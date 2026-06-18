@@ -57,7 +57,6 @@ public class SpeedMod implements ModInitializer {
                 try {
                     if (client != null && client.getWindow() != null) {
                         long window = client.getWindow().getHandle();
-
                         boolean rightShiftPressed = GLFW.glfwGetKey(window, GLFW.GLFW_KEY_RIGHT_SHIFT) == GLFW.GLFW_PRESS;
                         if (rightShiftPressed && !wasRightShiftPressed) {
                             client.execute(() -> client.setScreen(new SettingsGUI()));
@@ -92,7 +91,6 @@ public class SpeedMod implements ModInitializer {
                         lockedTarget = getTarget(client);
                         target = lockedTarget;
                     }
-
                     if (target == null) {
                         Thread.sleep(50);
                         continue;
@@ -111,14 +109,12 @@ public class SpeedMod implements ModInitializer {
                     double dx = targetPos.x - eyePos.x;
                     double dy = targetPos.y - eyePos.y;
                     double dz = targetPos.z - eyePos.z;
-
                     double distance = Math.sqrt(dx * dx + dz * dz);
                     float yaw = (float) MathHelper.atan2(dz, dx) * (180F / (float) Math.PI) - 90F;
                     float pitch = (float) -MathHelper.atan2(dy, distance) * (180F / (float) Math.PI);
 
                     float jitterYaw = (random.nextFloat() - 0.5f) * JITTER_RANGE * 2;
                     float jitterPitch = (random.nextFloat() - 0.5f) * JITTER_RANGE * 2;
-
                     float shift = 0f;
                     if (ENABLE_SHIFT && isShiftPhase) shift = SHIFT_DEGREES;
 
@@ -134,17 +130,14 @@ public class SpeedMod implements ModInitializer {
 
                         float currentYaw = client.player.getYaw();
                         float currentPitch = client.player.getPitch();
-
                         float newYaw = lerpAngle(currentYaw, finalYaw, SMOOTH_SPEED);
                         float newPitch = lerpAngle(currentPitch, finalPitch, SMOOTH_SPEED);
-
                         client.player.setYaw(newYaw);
                         client.player.setPitch(newPitch);
 
                         long now2 = System.currentTimeMillis();
                         double delay = MIN_DELAY + (MAX_DELAY - MIN_DELAY) * random.nextDouble();
                         long delayMs = (long) (delay * 1000);
-
                         if (now2 - lastAttackTime >= delayMs && finalTarget.isAlive()) {
                             if (SPRINT_RESET && client.player.isSprinting()) {
                                 client.player.setSprinting(false);
@@ -187,7 +180,7 @@ public class SpeedMod implements ModInitializer {
         return from + step;
     }
 
-    // =================== GUI с кнопками +/− ===================
+    // =================== GUI (без слайдеров, только кнопки + тексты) ===================
     private static class SettingsGUI extends Screen {
         private static final int WIDTH = 230;
         private static final int HEIGHT = 300;
@@ -227,15 +220,12 @@ public class SpeedMod implements ModInitializer {
 
             // === Радиус ===
             rangeText = new TextWidget(x + 10, y + 55, 80, 20, Text.literal("Радиус: " + String.format("%.1f", RANGE)), textRenderer);
-            rangeText.setColor(0xFF69B4);
             this.addDrawableChild(rangeText);
-
             rangeDec = ButtonWidget.builder(Text.literal("-"), btn -> {
                 RANGE = Math.max(1.0, RANGE - 0.1);
                 rangeText.setMessage(Text.literal("Радиус: " + String.format("%.1f", RANGE)));
             }).dimensions(x + 100, y + 55, 20, 20).build();
             this.addDrawableChild(rangeDec);
-
             rangeInc = ButtonWidget.builder(Text.literal("+"), btn -> {
                 RANGE = Math.min(8.0, RANGE + 0.1);
                 rangeText.setMessage(Text.literal("Радиус: " + String.format("%.1f", RANGE)));
@@ -244,16 +234,13 @@ public class SpeedMod implements ModInitializer {
 
             // === Мин. задержка ===
             minDelayText = new TextWidget(x + 10, y + 80, 120, 20, Text.literal("Мин. задержка: " + String.format("%.3f", MIN_DELAY)), textRenderer);
-            minDelayText.setColor(0xFF69B4);
             this.addDrawableChild(minDelayText);
-
             minDelayDec = ButtonWidget.builder(Text.literal("-"), btn -> {
                 MIN_DELAY = Math.max(0.1, MIN_DELAY - 0.005);
                 if (MIN_DELAY > MAX_DELAY) MAX_DELAY = MIN_DELAY;
                 minDelayText.setMessage(Text.literal("Мин. задержка: " + String.format("%.3f", MIN_DELAY)));
             }).dimensions(x + 140, y + 80, 20, 20).build();
             this.addDrawableChild(minDelayDec);
-
             minDelayInc = ButtonWidget.builder(Text.literal("+"), btn -> {
                 MIN_DELAY = Math.min(MAX_DELAY, MIN_DELAY + 0.005);
                 minDelayText.setMessage(Text.literal("Мин. задержка: " + String.format("%.3f", MIN_DELAY)));
@@ -262,15 +249,12 @@ public class SpeedMod implements ModInitializer {
 
             // === Макс. задержка ===
             maxDelayText = new TextWidget(x + 10, y + 105, 120, 20, Text.literal("Макс. задержка: " + String.format("%.3f", MAX_DELAY)), textRenderer);
-            maxDelayText.setColor(0xFF69B4);
             this.addDrawableChild(maxDelayText);
-
             maxDelayDec = ButtonWidget.builder(Text.literal("-"), btn -> {
                 MAX_DELAY = Math.max(MIN_DELAY, MAX_DELAY - 0.005);
                 maxDelayText.setMessage(Text.literal("Макс. задержка: " + String.format("%.3f", MAX_DELAY)));
             }).dimensions(x + 140, y + 105, 20, 20).build();
             this.addDrawableChild(maxDelayDec);
-
             maxDelayInc = ButtonWidget.builder(Text.literal("+"), btn -> {
                 MAX_DELAY = Math.min(1.0, MAX_DELAY + 0.005);
                 maxDelayText.setMessage(Text.literal("Макс. задержка: " + String.format("%.3f", MAX_DELAY)));
@@ -279,15 +263,12 @@ public class SpeedMod implements ModInitializer {
 
             // === Джиттер ===
             jitterText = new TextWidget(x + 10, y + 130, 100, 20, Text.literal("Джиттер: " + String.format("%.2f", JITTER_RANGE)), textRenderer);
-            jitterText.setColor(0xFF69B4);
             this.addDrawableChild(jitterText);
-
             jitterDec = ButtonWidget.builder(Text.literal("-"), btn -> {
                 JITTER_RANGE = Math.max(0.0f, JITTER_RANGE - 0.01f);
                 jitterText.setMessage(Text.literal("Джиттер: " + String.format("%.2f", JITTER_RANGE)));
             }).dimensions(x + 120, y + 130, 20, 20).build();
             this.addDrawableChild(jitterDec);
-
             jitterInc = ButtonWidget.builder(Text.literal("+"), btn -> {
                 JITTER_RANGE = Math.min(1.0f, JITTER_RANGE + 0.01f);
                 jitterText.setMessage(Text.literal("Джиттер: " + String.format("%.2f", JITTER_RANGE)));
@@ -296,15 +277,12 @@ public class SpeedMod implements ModInitializer {
 
             // === Смещение ===
             shiftText = new TextWidget(x + 10, y + 155, 100, 20, Text.literal("Смещение: " + String.format("%.2f", SHIFT_DEGREES) + "°"), textRenderer);
-            shiftText.setColor(0xFF69B4);
             this.addDrawableChild(shiftText);
-
             shiftDec = ButtonWidget.builder(Text.literal("-"), btn -> {
                 SHIFT_DEGREES = Math.max(0.0f, SHIFT_DEGREES - 0.05f);
                 shiftText.setMessage(Text.literal("Смещение: " + String.format("%.2f", SHIFT_DEGREES) + "°"));
             }).dimensions(x + 120, y + 155, 20, 20).build();
             this.addDrawableChild(shiftDec);
-
             shiftInc = ButtonWidget.builder(Text.literal("+"), btn -> {
                 SHIFT_DEGREES = Math.min(1.0f, SHIFT_DEGREES + 0.05f);
                 shiftText.setMessage(Text.literal("Смещение: " + String.format("%.2f", SHIFT_DEGREES) + "°"));
