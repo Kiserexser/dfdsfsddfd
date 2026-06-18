@@ -16,7 +16,7 @@ public class SpeedMod implements ModInitializer {
 
     private static boolean enabled = false;
     private static final double MULTIPLIER = 2.0;
-    private static final Identifier MODIFIER_ID = new Identifier("speedmod", "boost");
+    private static final Identifier MODIFIER_ID = Identifier.of("speedmod", "boost");
 
     private Thread keyThread;
     private volatile boolean running = true;
@@ -35,7 +35,7 @@ public class SpeedMod implements ModInitializer {
                             enabled = !enabled;
                             updateSpeed(client);
                             LOGGER.info("SpeedMod: " + (enabled ? "ON" : "OFF"));
-                            Thread.sleep(300); // дебаунс
+                            Thread.sleep(300); // защита от многократного срабатывания
                         }
                     }
                     Thread.sleep(50);
