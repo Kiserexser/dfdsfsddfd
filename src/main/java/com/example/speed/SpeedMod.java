@@ -5,7 +5,6 @@ import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.gui.widget.ButtonWidget;
-import net.minecraft.client.gui.widget.TextWidget;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.sound.SoundEvents;
 import net.minecraft.text.Text;
@@ -23,33 +22,36 @@ import java.util.Random;
 public class SpeedMod implements ModInitializer {
     public static final Logger LOGGER = LoggerFactory.getLogger("speedmod");
 
-    // === Настройки ===
-    public static double RANGE = 4.5;
-    public static double MIN_DELAY = 0.680;
-    public static double MAX_DELAY = 0.700;
-    public static boolean SPRINT_RESET = true;
-    public static float SMOOTH_SPEED = 0.15f;
-    public static boolean ENABLE_SHIFT = true;
-    public static float SHIFT_DEGREES = 0.5f;
-    public static long SHIFT_DURATION_MS = 3000;
-    public static long RETURN_DURATION_MS = 2000;
-    public static float JITTER_RANGE = 0.15f;
-    public static boolean ENABLED = false;
+    // === Жёсткие настройки (не редактируются) ===
+    private static final double RANGE = 4.5;
+    private static final double MIN_DELAY = 0.680;
+    private static final double MAX_DELAY = 0.700;
+    private static final boolean SPRINT_RESET = true;
+    private static final float SMOOTH_SPEED = 0.15f;
+    private static final boolean ENABLE_SHIFT = true;
+    private static final float SHIFT_DEGREES = 0.5f;
+    private static final long SHIFT_DURATION_MS = 3000;
+    private static final long RETURN_DURATION_MS = 2000;
+    private static final float JITTER_RANGE = 0.15f;
 
+    private static boolean enabled = false;
     private static final Random random = new Random();
     private long lastAttackTime = 0;
 
     private Thread workerThread;
     private volatile boolean running = true;
+
     private float targetYaw = 0, targetPitch = 0;
     private long shiftCycleStart = System.currentTimeMillis();
     private boolean isShiftPhase = true;
     private LivingEntity lockedTarget = null;
-    private boolean wasRightShiftPressed = false;
+
+    // Для синхронизации с GUI
+    private static boolean wasRightShiftPressed = false;
 
     @Override
     public void onInitialize() {
-        LOGGER.info("SpeedMod KillAura loaded. Press RIGHT SHIFT to open settings.");
+        LOGGER.info("SpeedMod KillAura loaded. Press R or RIGHT SHIFT to toggle.");
 
         workerThread = new Thread(() -> {
             MinecraftClient client = MinecraftClient.getInstance();
@@ -57,20 +59,29 @@ public class SpeedMod implements ModInitializer {
                 try {
                     if (client != null && client.getWindow() != null) {
                         long window = client.getWindow().getHandle();
+
+                        // === Обработка R ===
+                        if (GLFW.glfwGetKey(window, GLFW.GLFW_KEY_R) == GLFW.GLFW_PRESS) {
+                            toggle();
+                            Thread.sleep(300);
+                        }
+
+                        // === Обработка правого Shift (открытие GUI) ===
                         boolean rightShiftPressed = GLFW.glfwGetKey(window, GLFW.GLFW_KEY_RIGHT_SHIFT) == GLFW.GLFW_PRESS;
                         if (rightShiftPressed && !wasRightShiftPressed) {
-                            client.execute(() -> client.setScreen(new SettingsGUI()));
+                            client.execute(() -> client.setScreen(new KillAuraGUI()));
                             wasRightShiftPressed = true;
                         } else if (!rightShiftPressed) {
                             wasRightShiftPressed = false;
                         }
                     }
 
-                    if (!ENABLED || client == null || client.player == null || client.world == null) {
+                    if (!enabled || client == null || client.player == null || client.world == null) {
                         Thread.sleep(50);
                         continue;
                     }
 
+                    // === Логика KillAura ===
                     long now = System.currentTimeMillis();
                     long elapsed = now - shiftCycleStart;
                     if (isShiftPhase && elapsed >= SHIFT_DURATION_MS) {
@@ -91,6 +102,7 @@ public class SpeedMod implements ModInitializer {
                         lockedTarget = getTarget(client);
                         target = lockedTarget;
                     }
+
                     if (target == null) {
                         Thread.sleep(50);
                         continue;
@@ -160,6 +172,24 @@ public class SpeedMod implements ModInitializer {
         workerThread.start();
     }
 
+    private static void toggle() {
+        enabled = !enabled;
+        if (!enabled) {
+            // сброс цели при выключении
+            MinecraftClient client = MinecraftClient.getInstance();
+            if (client != null && client.player != null) {
+                client.player.sendMessage(Text.literal(enabled ? "§aKillAura ON" : "§cKillAura OFF"), true);
+            }
+        }
+        LOGGER.info("KillAura: " + (enabled ? "ON" : "OFF"));
+        // Проигрываем звук через клиент
+        MinecraftClient.getInstance().execute(() -> {
+            if (MinecraftClient.getInstance().player != null) {
+                MinecraftClient.getInstance().player.playSound(SoundEvents.UI_BUTTON_CLICK.value(), 1.0f, 1.0f);
+            }
+        });
+    }
+
     private LivingEntity getTarget(MinecraftClient client) {
         try {
             Box box = client.player.getBoundingBox().expand(RANGE);
@@ -180,24 +210,15 @@ public class SpeedMod implements ModInitializer {
         return from + step;
     }
 
-    // =================== GUI (без слайдеров, только кнопки + тексты) ===================
-    private static class SettingsGUI extends Screen {
-        private static final int WIDTH = 230;
-        private static final int HEIGHT = 300;
+    // =================== GUI (только On/Off) ===================
+    private static class KillAuraGUI extends Screen {
+        private static final int WIDTH = 160;
+        private static final int HEIGHT = 90;
         private int x, y;
-
         private ButtonWidget toggleButton;
-        private TextWidget rangeText, minDelayText, maxDelayText, jitterText, shiftText;
-        private ButtonWidget rangeDec, rangeInc;
-        private ButtonWidget minDelayDec, minDelayInc;
-        private ButtonWidget maxDelayDec, maxDelayInc;
-        private ButtonWidget jitterDec, jitterInc;
-        private ButtonWidget shiftDec, shiftInc;
-        private ButtonWidget sprintToggle, shiftToggle;
-        private ButtonWidget closeButton;
 
-        protected SettingsGUI() {
-            super(Text.literal("SpeedMod Settings"));
+        protected KillAuraGUI() {
+            super(Text.literal("SpeedMod"));
         }
 
         @Override
@@ -206,117 +227,19 @@ public class SpeedMod implements ModInitializer {
             this.x = (this.width - WIDTH) / 2;
             this.y = (this.height - HEIGHT) / 2;
 
-            // === On/Off ===
             toggleButton = ButtonWidget.builder(
-                    Text.literal(ENABLED ? "§aON" : "§cOFF"),
+                    Text.literal(enabled ? "§aВКЛ" : "§cВЫКЛ"),
                     btn -> {
-                        ENABLED = !ENABLED;
-                        toggleButton.setMessage(Text.literal(ENABLED ? "§aON" : "§cOFF"));
-                        if (client != null && client.player != null)
-                            client.player.playSound(SoundEvents.UI_BUTTON_CLICK.value(), 1.0f, 1.0f);
+                        toggle(); // переключаем состояние через тот же метод
+                        toggleButton.setMessage(Text.literal(enabled ? "§aВКЛ" : "§cВЫКЛ"));
                     }
-            ).dimensions(x + 10, y + 25, 60, 20).build();
+            ).dimensions(x + 30, y + 40, 100, 20).build();
             this.addDrawableChild(toggleButton);
-
-            // === Радиус ===
-            rangeText = new TextWidget(x + 10, y + 55, 80, 20, Text.literal("Радиус: " + String.format("%.1f", RANGE)), textRenderer);
-            this.addDrawableChild(rangeText);
-            rangeDec = ButtonWidget.builder(Text.literal("-"), btn -> {
-                RANGE = Math.max(1.0, RANGE - 0.1);
-                rangeText.setMessage(Text.literal("Радиус: " + String.format("%.1f", RANGE)));
-            }).dimensions(x + 100, y + 55, 20, 20).build();
-            this.addDrawableChild(rangeDec);
-            rangeInc = ButtonWidget.builder(Text.literal("+"), btn -> {
-                RANGE = Math.min(8.0, RANGE + 0.1);
-                rangeText.setMessage(Text.literal("Радиус: " + String.format("%.1f", RANGE)));
-            }).dimensions(x + 130, y + 55, 20, 20).build();
-            this.addDrawableChild(rangeInc);
-
-            // === Мин. задержка ===
-            minDelayText = new TextWidget(x + 10, y + 80, 120, 20, Text.literal("Мин. задержка: " + String.format("%.3f", MIN_DELAY)), textRenderer);
-            this.addDrawableChild(minDelayText);
-            minDelayDec = ButtonWidget.builder(Text.literal("-"), btn -> {
-                MIN_DELAY = Math.max(0.1, MIN_DELAY - 0.005);
-                if (MIN_DELAY > MAX_DELAY) MAX_DELAY = MIN_DELAY;
-                minDelayText.setMessage(Text.literal("Мин. задержка: " + String.format("%.3f", MIN_DELAY)));
-            }).dimensions(x + 140, y + 80, 20, 20).build();
-            this.addDrawableChild(minDelayDec);
-            minDelayInc = ButtonWidget.builder(Text.literal("+"), btn -> {
-                MIN_DELAY = Math.min(MAX_DELAY, MIN_DELAY + 0.005);
-                minDelayText.setMessage(Text.literal("Мин. задержка: " + String.format("%.3f", MIN_DELAY)));
-            }).dimensions(x + 170, y + 80, 20, 20).build();
-            this.addDrawableChild(minDelayInc);
-
-            // === Макс. задержка ===
-            maxDelayText = new TextWidget(x + 10, y + 105, 120, 20, Text.literal("Макс. задержка: " + String.format("%.3f", MAX_DELAY)), textRenderer);
-            this.addDrawableChild(maxDelayText);
-            maxDelayDec = ButtonWidget.builder(Text.literal("-"), btn -> {
-                MAX_DELAY = Math.max(MIN_DELAY, MAX_DELAY - 0.005);
-                maxDelayText.setMessage(Text.literal("Макс. задержка: " + String.format("%.3f", MAX_DELAY)));
-            }).dimensions(x + 140, y + 105, 20, 20).build();
-            this.addDrawableChild(maxDelayDec);
-            maxDelayInc = ButtonWidget.builder(Text.literal("+"), btn -> {
-                MAX_DELAY = Math.min(1.0, MAX_DELAY + 0.005);
-                maxDelayText.setMessage(Text.literal("Макс. задержка: " + String.format("%.3f", MAX_DELAY)));
-            }).dimensions(x + 170, y + 105, 20, 20).build();
-            this.addDrawableChild(maxDelayInc);
-
-            // === Джиттер ===
-            jitterText = new TextWidget(x + 10, y + 130, 100, 20, Text.literal("Джиттер: " + String.format("%.2f", JITTER_RANGE)), textRenderer);
-            this.addDrawableChild(jitterText);
-            jitterDec = ButtonWidget.builder(Text.literal("-"), btn -> {
-                JITTER_RANGE = Math.max(0.0f, JITTER_RANGE - 0.01f);
-                jitterText.setMessage(Text.literal("Джиттер: " + String.format("%.2f", JITTER_RANGE)));
-            }).dimensions(x + 120, y + 130, 20, 20).build();
-            this.addDrawableChild(jitterDec);
-            jitterInc = ButtonWidget.builder(Text.literal("+"), btn -> {
-                JITTER_RANGE = Math.min(1.0f, JITTER_RANGE + 0.01f);
-                jitterText.setMessage(Text.literal("Джиттер: " + String.format("%.2f", JITTER_RANGE)));
-            }).dimensions(x + 150, y + 130, 20, 20).build();
-            this.addDrawableChild(jitterInc);
-
-            // === Смещение ===
-            shiftText = new TextWidget(x + 10, y + 155, 100, 20, Text.literal("Смещение: " + String.format("%.2f", SHIFT_DEGREES) + "°"), textRenderer);
-            this.addDrawableChild(shiftText);
-            shiftDec = ButtonWidget.builder(Text.literal("-"), btn -> {
-                SHIFT_DEGREES = Math.max(0.0f, SHIFT_DEGREES - 0.05f);
-                shiftText.setMessage(Text.literal("Смещение: " + String.format("%.2f", SHIFT_DEGREES) + "°"));
-            }).dimensions(x + 120, y + 155, 20, 20).build();
-            this.addDrawableChild(shiftDec);
-            shiftInc = ButtonWidget.builder(Text.literal("+"), btn -> {
-                SHIFT_DEGREES = Math.min(1.0f, SHIFT_DEGREES + 0.05f);
-                shiftText.setMessage(Text.literal("Смещение: " + String.format("%.2f", SHIFT_DEGREES) + "°"));
-            }).dimensions(x + 150, y + 155, 20, 20).build();
-            this.addDrawableChild(shiftInc);
-
-            // === Сброс спринта ===
-            sprintToggle = ButtonWidget.builder(
-                    Text.literal(SPRINT_RESET ? "§aСброс спринта Вкл" : "§cСброс спринта Выкл"),
-                    btn -> {
-                        SPRINT_RESET = !SPRINT_RESET;
-                        sprintToggle.setMessage(Text.literal(SPRINT_RESET ? "§aСброс спринта Вкл" : "§cСброс спринта Выкл"));
-                    }
-            ).dimensions(x + 10, y + 185, 140, 20).build();
-            this.addDrawableChild(sprintToggle);
-
-            // === Смещение вкл/выкл ===
-            shiftToggle = ButtonWidget.builder(
-                    Text.literal(ENABLE_SHIFT ? "§aСмещение Вкл" : "§cСмещение Выкл"),
-                    btn -> {
-                        ENABLE_SHIFT = !ENABLE_SHIFT;
-                        shiftToggle.setMessage(Text.literal(ENABLE_SHIFT ? "§aСмещение Вкл" : "§cСмещение Выкл"));
-                    }
-            ).dimensions(x + 10, y + 210, 140, 20).build();
-            this.addDrawableChild(shiftToggle);
-
-            // === Закрыть ===
-            closeButton = ButtonWidget.builder(Text.literal("Закрыть"), btn -> this.close())
-                    .dimensions(x + 80, y + HEIGHT - 30, 70, 20).build();
-            this.addDrawableChild(closeButton);
         }
 
         @Override
         public void render(DrawContext context, int mouseX, int mouseY, float delta) {
+            // Белый фон с розовой рамкой
             int bgColor = 0xFFFFFF;
             int borderColor = 0xFFB6C1;
             int textColor = 0xFF69B4;
@@ -327,8 +250,8 @@ public class SpeedMod implements ModInitializer {
             context.fill(x, y, x + 1, y + HEIGHT, borderColor);
             context.fill(x + WIDTH - 1, y, x + WIDTH, y + HEIGHT, borderColor);
 
-            context.drawCenteredTextWithShadow(textRenderer, Text.literal("§dCombat"), x + WIDTH/2, y + 5, textColor);
-            context.drawTextWithShadow(textRenderer, Text.literal("§dKillAura"), x + 15, y + 28, textColor);
+            context.drawCenteredTextWithShadow(textRenderer, Text.literal("§dKillAura"), x + WIDTH/2, y + 10, textColor);
+            context.drawCenteredTextWithShadow(textRenderer, Text.literal(enabled ? "§aВключена" : "§cВыключена"), x + WIDTH/2, y + 25, textColor);
 
             super.render(context, mouseX, mouseY, delta);
         }
