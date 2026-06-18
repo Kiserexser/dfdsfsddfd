@@ -1,15 +1,16 @@
 {
   "schemaVersion": 1,
   "id": "speedmod",
-  "version": "1.0.0",
+  "version": "${version}",
   "name": "Speed Mod",
-  "description": "",
+  "description": "KillAura with HUD",
   "authors": [],
   "license": "MIT",
   "environment": "client",
   "entrypoints": {
     "main": ["com.example.speed.SpeedMod"]
   },
+  "mixins": ["speedmod.mixins.json"],
   "depends": {
     "fabricloader": ">=0.15.11",
     "minecraft": "1.21.4"
