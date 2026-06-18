@@ -4,26 +4,21 @@ import net.fabricmc.api.ModInitializer;
 import net.minecraft.block.SlabBlock;
 import net.minecraft.block.StairsBlock;
 import net.minecraft.client.MinecraftClient;
-import net.minecraft.entity.Pose;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
-import net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket;
 import net.minecraft.util.Hand;
 import net.minecraft.util.hit.BlockHitResult;
 import net.minecraft.util.hit.HitResult;
-import net.minecraft.util.math.Vec3d;
 import org.lwjgl.glfw.GLFW;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
-import java.util.concurrent.ThreadLocalRandom;
 
 public class SpeedMod implements ModInitializer {
     public static final Logger LOGGER = LoggerFactory.getLogger("speedmod");
     private static final MinecraftClient mc = MinecraftClient.getInstance();
 
     private static boolean enabled = false;
-    private static String currentMode = "Slap"; // "Slap" или "Matrix"
+    private static String currentMode = "Slap";
 
     // === Slap ===
     private boolean placed = false;
@@ -83,7 +78,6 @@ public class SpeedMod implements ModInitializer {
             onDisable();
             LOGGER.info("LongJump OFF");
         }
-        // звук (опционально)
         mc.execute(() -> {
             if (mc.player != null) {
                 mc.player.playSound(net.minecraft.sound.SoundEvents.UI_BUTTON_CLICK.value(), 1.0f, 1.0f);
@@ -109,7 +103,6 @@ public class SpeedMod implements ModInitializer {
 
     private void onDisable() {
         mc.player.setVelocity(0, mc.player.getVelocity().y, 0);
-        mc.player.setPose(Pose.STANDING);
         placed = false;
         sent = false;
         canBoost = false;
@@ -165,7 +158,7 @@ public class SpeedMod implements ModInitializer {
                     && !(mc.world.getBlockState(result.getBlockPos()).getBlock() instanceof SlabBlock)
                     && slapTimer.hasReached(750)) {
 
-                mc.player.setPose(Pose.STANDING);
+                // Убираем установку позы (Pose.STANDING) – не критично
                 slapTimer.reset();
                 placed = false;
             } else if ((mc.player.isOnGround() && !mc.options.jumpKey.isPressed())) {
@@ -206,18 +199,14 @@ public class SpeedMod implements ModInitializer {
                 sent = true;
                 ticks = 0;
                 canBoost = true;
-                // сброс таймера (не используется)
             }
         }
 
         if (canBoost) {
-            // Установка скорости
             double yaw = Math.toRadians(mc.player.getYaw());
             double motionX = -Math.sin(yaw) * matrixSpeed;
             double motionZ = Math.cos(yaw) * matrixSpeed;
             mc.player.setVelocity(motionX, 0.42, motionZ);
-            // Отключаем после рывка (как в оригинале)
-            // В оригинале отключается при флаге, но мы сделаем через 10 тиков после рывка
             if (ticks > 10) {
                 enabled = false;
                 LOGGER.info("LongJump disabled after boost.");
@@ -228,7 +217,7 @@ public class SpeedMod implements ModInitializer {
         ticks++;
     }
 
-    // ======================== StopWatch (аналог) ========================
+    // ======================== StopWatch ========================
     private static class StopWatch {
         private long lastMillis = 0;
 
