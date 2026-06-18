@@ -1,164 +1,138 @@
 package com.example.speed;
 
-import dev.relictdlc.module.Module;
-import dev.relictdlc.module.ModuleCategory;
-import dev.relictdlc.setting.ModeSetting;
-import dev.relictdlc.setting.NumberSetting;
-import dev.relictdlc.event.events.EventUpdate;
-import dev.relictdlc.event.EventTarget;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket;
-import net.minecraft.network.packet.c2s.play.TeleportConfirmC2SPacket;
-import org.lwjgl.glfw.GLFW;
+import lombok.AccessLevel;
+import lombok.Getter;
+import lombok.Setter;
+import lombok.experimental.FieldDefaults;
+import net.fabricmc.api.ModInitializer;
+import net.minecraft.entity.LivingEntity;
+import net.minecraft.item.Items;
+import net.minecraft.util.math.Vec3d;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import ru.zenith.api.event.EventHandler;
+import ru.zenith.api.event.types.EventType;
+import ru.zenith.api.feature.module.Module;
+import ru.zenith.api.feature.module.ModuleCategory;
+import ru.zenith.api.feature.module.setting.implement.ValueSetting;
+import ru.zenith.common.util.other.Instance;
+import ru.zenith.common.util.task.TaskPriority;
+import ru.zenith.implement.events.player.RotationUpdateEvent;
+import ru.zenith.implement.features.modules.combat.Aura;
+import ru.zenith.implement.features.modules.combat.killaura.rotation.Angle;
+import ru.zenith.implement.features.modules.combat.killaura.rotation.AngleUtil;
+import ru.zenith.implement.features.modules.combat.killaura.rotation.RotationConfig;
+import ru.zenith.implement.features.modules.combat.killaura.rotation.RotationController;
+import ru.zenith.implement.features.modules.combat.killaura.rotation.angle.SnapSmoothMode;
 
-public class SpeedMod extends Module {
-
-    // Настройки (как в твоём HighJump)
-    public final ModeSetting mode = addSetting(new ModeSetting("Режим", "Режим полёта", "Vanilla", "Vanilla", "Grim", "Vulcan"));
-    public final NumberSetting speed = addSetting(new NumberSetting("Скорость", "Скорость полёта", 1.0, 0.1, 5.0, 0.1));
-    public final NumberSetting deffval = addSetting(new NumberSetting("Значение", "Базовое значение", 0.5, 0.1, 2.0, 0.05));
-    public final NumberSetting divval = addSetting(new NumberSetting("Делитель", "Делитель для диагонали", 1.0, 0.5, 2.0, 0.05));
-    public final NumberSetting MFPacketCount = addSetting(new NumberSetting("Пакеты", "Количество пакетов", 20, 1, 50, 1));
-    public final NumberSetting LowTimer = addSetting(new NumberSetting("Таймер", "Скорость таймера", 1.0, 0.1, 2.0, 0.05));
-    public final ModeSetting MFRotFix = addSetting(new ModeSetting("RotFix", "Фикс поворота", "On", "On", "Off"));
-
-    private final MinecraftClient mc = MinecraftClient.getInstance();
-    private int flydelay = 0;
-    private int index1 = 0;
-    private double mothor = 0, motver = 0;
-    private double nx = 0, nz = 0;
-    private float fixedyaw = 0, fixedpitch = 0;
-    private int flytype = 0;
-    private int LastTpNum = 0;
-    private double xt = 0, zt = 0;
-
-    // Эти объекты должны быть в твоём проекте – я их просто объявляю
-    private final Object pc = new Object(); // замени на свой класс PlayerController
-    private final Object client = Client.instance; // если есть Client.instance
-    private final Object disabler = new Object(); // заглушка
-
+@Setter
+@Getter
+@FieldDefaults(level = AccessLevel.PRIVATE, makeFinal = true)
+public class SpeedMod extends Module implements ModInitializer {
+    
+    private static final Logger LOGGER = LoggerFactory.getLogger("speedmod");
+    
+    public static SpeedMod getInstance() {
+        return Instance.get(SpeedMod.class);
+    }
+    
+    ValueSetting elytraDistance = new ValueSetting("Elytra Distance", "Distance to target players (applies to Aura when enabled)")
+            .setValue(15).range(1F, 100F);
+    
     public SpeedMod() {
-        super("SpeedMod", "Полёт с обходом Vanilla", ModuleCategory.MOVEMENT, GLFW.GLFW_KEY_UNKNOWN);
+        super("SpeedMod", ModuleCategory.COMBAT);
+        setup(elytraDistance);
     }
-
+    
     @Override
-    public void onDisable() {
-        flydelay = 0;
-        index1 = 0;
-        mothor = 0;
-        motver = 0;
-        MoveUtil.stop3();
-        TimerUtil.setTimerspeed(1.0f);
+    public void onInitialize() {
+        LOGGER.info("SpeedMod (ElytraTarget) initialized!");
+        // Модуль автоматически регистрируется системой Zenith через аннотации.
+        // Если нужно вручную – раскомментируй:
+        // ModuleManager.getInstance().registerModule(this);
     }
-
-    @EventTarget
-    public void onUpdate(EventUpdate event) {
-        if (mc.player == null) return;
-
-        String currentMode = mode.getValue();
-        switch (currentMode) {
-            case "Vanilla":
-                // ====== ТВОЙ ОРИГИНАЛЬНЫЙ КОД (без изменений) ======
-                if (MoveUtil.motYstate() == 0) {
-                    if (MoveUtil.getdir() != -1.0F) {
-                        mothor = deffval.getValue();
-                    }
-                } else if (MoveUtil.motYstate() > 0) {
-                    mothor = 0.0;
-                    motver = deffval.getValue();
-                    if (MoveUtil.getdir() != -1.0F) {
-                        motver = deffval.getValue() / Math.sqrt(2.0) / divval.getValue();
-                        mothor = deffval.getValue() / Math.sqrt(2.0) / divval.getValue();
-                    }
-                } else if (MoveUtil.motYstate() < 0) {
-                    mothor = 0.0;
-                    motver = -deffval.getValue();
-                    if (MoveUtil.getdir() != -1.0F) {
-                        motver = -deffval.getValue() / Math.sqrt(2.0) / divval.getValue();
-                        mothor = deffval.getValue() / Math.sqrt(2.0) / divval.getValue();
-                    }
-                }
-
-                int tries = (int) MFPacketCount.getValue();
-                if (pc.lastTptimer.hasTimeElapsed(4000L, false)) {
-                    this.flydelay = 3;
-                }
-
-                if (this.flydelay > 0) {
-                    tries = 1;
-                    mothor = 0.0;
-                    motver = 0.0;
-                } else {
-                    tries = (int) MFPacketCount.getValue();
-                }
-
-                if ((mothor != 0.0 || motver != 0.0 || this.flydelay > 0) && Client.instance.flagsch.getFlags().size() <= 0) {
-                    if (MFRotFix.getValue().equals("On")) {
-                        PacketHelper.Values.sendPacket(new PlayerMoveC2SPacket.PositionAndOnGround(nx, pc.LastPosY, nz, false), 10, true);
-                        pc.LastTpNum++;
-                        PacketHelper.Values.sendPacket(new TeleportConfirmC2SPacket(pc.LastTpNum));
-                        Client.instance
-                            .flagsch
-                            .getFlags()
-                            .addFirst(new FlagHelper.SkippedFlag(pc.LastPosX, pc.LastPosY, pc.LastPosZ, pc.LastTpNum, false, false));
-                    }
-
-                    pc.lastTptimer.reset();
-
-                    for (int ix = 0; ix < tries; ix++) {
-                        nx = pc.LastPosX + 90.0 + Math.random() * 90.0;
-                        nz = pc.LastPosZ + 90.0 + Math.random() * 90.0;
-                        if (index1 > 0) {
-                            PacketHelper.Values.sendPacket(
-                                new PlayerMoveC2SPacket.PositionAndOnGround(pc.LastPosX + xt * mothor, pc.LastPosY + motver, pc.LastPosZ + zt * mothor, false), 10, true
-                            );
-                        }
-
-                        PacketHelper.Values.sendPacket(new PlayerMoveC2SPacket.Full(nx, pc.LastPosY, nz, pc.LastYaw, pc.LastPitch, false), 10, true);
-                        pc.LastTpNum++;
-                        PacketHelper.Values.sendPacket(new TeleportConfirmC2SPacket(pc.LastTpNum));
-                        Client.instance
-                            .flagsch
-                            .getFlags()
-                            .addFirst(new FlagHelper.SkippedFlag(pc.LastPosX, pc.LastPosY, pc.LastPosZ, pc.LastTpNum, false, false));
-                        if (index1 > 0) {
-                            mc.player.setPosition(pc.LastPosX + xt * mothor, pc.LastPosY + motver, pc.LastPosZ + zt * mothor);
-                            pc.LastPosX = mc.player.getX();
-                            pc.LastPosY = mc.player.getY();
-                            pc.LastPosZ = mc.player.getZ();
-                        }
-
-                        Disabler.savedabusepacket--;
-                    }
-
-                    if (MFRotFix.getValue().equals("On")) {
-                        pc.LastYaw = this.fixedyaw;
-                        pc.LastPitch = this.fixedpitch;
-                        this.flytype = 0;
-                        Disabler.savedabusepacket--;
-                        PacketHelper.Values.sendPacket(
-                            new PlayerMoveC2SPacket.Full(pc.LastPosX, pc.LastPosY, pc.LastPosZ, pc.LastYaw, pc.LastPitch, false), 10, true
-                        );
-                    }
-
-                    index1++;
-                }
-
-                MoveUtil.stop3();
-                TimerUtil.setTimerspeed((float) LowTimer.getValue());
-                if (this.flydelay > 0) {
-                    this.flydelay--;
-                }
-                break;
-
-            case "Grim":
-                // можно добавить другой обход
-                break;
-            case "Vulcan":
-                // можно добавить другой обход
-                break;
-            default:
-                break;
+    
+    @Override
+    public void deactivate() {
+        RotationController.INSTANCE.clear();
+        super.deactivate();
+    }
+    
+    @EventHandler
+    public void onRotationUpdate(RotationUpdateEvent e) {
+        if (e.getType() != EventType.PRE) return;
+        
+        Aura aura = Aura.getInstance();
+        if (aura == null || !aura.isState()) {
+            return;
         }
+        
+        if (!hasElytra() || !mc.player.isGliding()) {
+            return;
+        }
+        
+        LivingEntity target = aura.getTarget();
+        if (target == null) {
+            return;
+        }
+        
+        improvedTargeting(target);
+    }
+    
+    private boolean hasElytra() {
+        return mc.player != null &&
+               mc.player.getInventory().getArmorStack(2).getItem() == Items.ELYTRA;
+    }
+    
+    private void improvedTargeting(LivingEntity target) {
+        if (target == null || mc.player == null) return;
+        
+        Vec3d playerPos = mc.player.getEyePos();
+        Vec3d targetPos = target.getPos();
+        Vec3d targetVelocity = target.getVelocity();
+        
+        double distance = playerPos.distanceTo(targetPos);
+        int predictionTicks = (int) Math.min(5, Math.max(2, distance / 10));
+        Vec3d predictedPos = targetPos.add(targetVelocity.multiply(predictionTicks));
+        
+        Vec3d aimPoint = calculateOptimalAimPoint(predictedPos, target, distance);
+        
+        Angle targetAngle = AngleUtil.fromVec3d(aimPoint.subtract(playerPos));
+        
+        RotationController controller = RotationController.INSTANCE;
+        RotationConfig config = new RotationConfig(new SnapSmoothMode(), true, true);
+        
+        controller.rotateTo(
+            new Angle.VecRotation(targetAngle, targetAngle.toVector()),
+            target,
+            1,
+            config,
+            TaskPriority.HIGH_IMPORTANCE_1,
+            this
+        );
+    }
+    
+    private Vec3d calculateOptimalAimPoint(Vec3d targetPos, LivingEntity target, double distance) {
+        double targetHeight = target.getHeight();
+        double targetWidth = target.getWidth();
+        
+        Vec3d basePoint = targetPos.add(0, targetHeight / 2, 0);
+        
+        if (distance > 10) {
+            basePoint = targetPos.add(0, targetHeight * 0.6, 0);
+        } else if (distance < 4) {
+            basePoint = targetPos.add(0, targetHeight * 0.4, 0);
+        }
+        
+        double randomX = (Math.random() - 0.5) * targetWidth * 0.3;
+        double randomY = (Math.random() - 0.5) * targetHeight * 0.2;
+        double randomZ = (Math.random() - 0.5) * targetWidth * 0.3;
+        
+        return basePoint.add(randomX, randomY, randomZ);
+    }
+    
+    public boolean isActiveForElytra() {
+        Aura aura = Aura.getInstance();
+        return aura != null && aura.isState() && hasElytra() && mc.player != null && mc.player.isGliding();
     }
 }
