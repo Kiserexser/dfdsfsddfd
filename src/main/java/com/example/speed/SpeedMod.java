@@ -48,7 +48,7 @@ public class SpeedMod implements ModInitializer {
     private long shiftCycleStart = System.currentTimeMillis();
     private boolean isShiftPhase = true;
 
-    // === ЗАФИКСИРОВАННАЯ ЦЕЛЬ ===
+    // ЗАФИКСИРОВАННАЯ ЦЕЛЬ
     private LivingEntity lockedTarget = null;
 
     @Override
@@ -64,7 +64,7 @@ public class SpeedMod implements ModInitializer {
                         long window = client.getWindow().getHandle();
                         if (GLFW.glfwGetKey(window, GLFW.GLFW_KEY_R) == GLFW.GLFW_PRESS) {
                             enabled = !enabled;
-                            if (!enabled) lockedTarget = null; // сброс цели при выключении
+                            if (!enabled) lockedTarget = null;
                             LOGGER.info("KillAura: " + (enabled ? "ON" : "OFF"));
                             Thread.sleep(300);
                         }
@@ -87,7 +87,6 @@ public class SpeedMod implements ModInitializer {
                     }
 
                     // === Логика выбора цели (с фиксацией) ===
-                    // Если есть зафиксированная цель – проверяем, жива ли и в радиусе
                     LivingEntity target = null;
                     if (lockedTarget != null && lockedTarget.isAlive() && !lockedTarget.isDead()) {
                         double dist = client.player.distanceTo(lockedTarget);
@@ -96,7 +95,6 @@ public class SpeedMod implements ModInitializer {
                         }
                     }
 
-                    // Если цели нет или она ушла – ищем новую ближайшую и фиксируем её
                     if (target == null) {
                         lockedTarget = getTarget(client);
                         target = lockedTarget;
@@ -109,13 +107,12 @@ public class SpeedMod implements ModInitializer {
 
                     double dist = client.player.distanceTo(target);
                     if (dist > RANGE) {
-                        // цель ушла слишком далеко – сбрасываем
                         lockedTarget = null;
                         Thread.sleep(50);
                         continue;
                     }
 
-                    // === Вычисление углов на цель (с джиттером и смещением) ===
+                    // === Вычисление углов на цель ===
                     Vec3d eyePos = client.player.getEyePos();
                     Vec3d targetPos = target.getPos().add(0, target.getHeight() * 0.5, 0);
 
@@ -131,7 +128,7 @@ public class SpeedMod implements ModInitializer {
                     float jitterYaw = (random.nextFloat() - 0.5f) * JITTER_RANGE * 2;
                     float jitterPitch = (random.nextFloat() - 0.5f) * JITTER_RANGE * 2;
 
-                    // Смещение вниз/вверх (периодическое)
+                    // Смещение
                     float shift = 0f;
                     if (ENABLE_SHIFT && isShiftPhase) {
                         shift = SHIFT_DEGREES;
@@ -144,6 +141,7 @@ public class SpeedMod implements ModInitializer {
                     targetPitch = finalPitch;
 
                     // === Плавная ротация и атака ===
+                    final LivingEntity targetFinal = target; // финальная копия для лямбды
                     client.execute(() -> {
                         if (client.player == null) return;
 
@@ -156,16 +154,15 @@ public class SpeedMod implements ModInitializer {
                         client.player.setYaw(newYaw);
                         client.player.setPitch(newPitch);
 
-                        // Атака
                         long now2 = System.currentTimeMillis();
                         double delay = MIN_DELAY + (MAX_DELAY - MIN_DELAY) * random.nextDouble();
                         long delayMs = (long) (delay * 1000);
 
-                        if (now2 - lastAttackTime >= delayMs && target.isAlive()) {
+                        if (now2 - lastAttackTime >= delayMs && targetFinal.isAlive()) {
                             if (SPRINT_RESET && client.player.isSprinting()) {
                                 client.player.setSprinting(false);
                             }
-                            client.interactionManager.attackEntity(client.player, target);
+                            client.interactionManager.attackEntity(client.player, targetFinal);
                             client.player.swingHand(client.player.getActiveHand());
                             lastAttackTime = now2;
                         }
