@@ -1,90 +1,83 @@
 package com.example.speed;
 
-import dev.relictdlc.module.Module;
-import dev.relictdlc.module.ModuleCategory;
-import dev.relictdlc.setting.BooleanSetting;
-import dev.relictdlc.setting.NumberSetting;
-import dev.relictdlc.event.events.EventUpdate;
-import dev.relictdlc.event.EventTarget;
+import net.fabricmc.api.ModInitializer;
+import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
+import net.minecraft.client.MinecraftClient;
 import net.minecraft.entity.LivingEntity;
+import net.minecraft.entity.player.PlayerEntity;
+import net.minecraft.util.hit.EntityHitResult;
 import net.minecraft.util.math.Box;
-import org.lwjgl.glfw.GLFW;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.Comparator;
 import java.util.List;
 import java.util.Random;
 
-public class SpeedMod extends Module {
-
-    // ===== Настройки =====
-    private final NumberSetting range = addSetting(new NumberSetting("Радиус", "Дистанция атаки", 4.5, 1.0, 8.0, 0.1));
-    private final NumberSetting minDelay = addSetting(new NumberSetting("Мин. задержка", "Минимальная задержка (сек)", 0.680, 0.1, 1.0, 0.005));
-    private final NumberSetting maxDelay = addSetting(new NumberSetting("Макс. задержка", "Максимальная задержка (сек)", 0.740, 0.1, 1.0, 0.005));
-    private final NumberSetting jitterH = addSetting(new NumberSetting("Дрожание (гор)", "Горизонтальное дрожание (градусы)", 3.0, 0.0, 10.0, 0.1));
-    private final NumberSetting jitterV = addSetting(new NumberSetting("Дрожание (верт)", "Вертикальное дрожание (градусы)", 5.0, 0.0, 10.0, 0.1));
-    private final BooleanSetting sprintReset = addSetting(new BooleanSetting("Сброс спринта", "Отключать спринт перед ударом", true));
-
-    // ===== Внутренние переменные =====
+public class SpeedMod implements ModInitializer {
+    public static final Logger LOGGER = LoggerFactory.getLogger("speedmod");
+    private static final Random random = new Random();
     private long lastAttackTime = 0;
-    private final Random random = new Random();
+    private boolean enabled = false; // можно включить/выключить по клавише, но пока просто включено
 
-    public SpeedMod() {
-        super("SpeedMod", "KillAura с дрожанием", ModuleCategory.COMBAT, GLFW.GLFW_KEY_UNKNOWN);
-    }
-
-    @EventTarget
-    public void onUpdate(EventUpdate event) {
-        if (mc.player == null || mc.world == null) return;
-
-        // 1. Поиск цели
-        LivingEntity target = getTarget();
-        if (target == null) return;
-
-        // 2. Проверка дистанции
-        double dist = mc.player.distanceTo(target);
-        if (dist > range.getValue()) return;
-
-        // 3. Задержка между ударами
-        long now = System.currentTimeMillis();
-        double delay = minDelay.getValue() + (maxDelay.getValue() - minDelay.getValue()) * random.nextDouble();
-        long delayMs = (long) (delay * 1000);
-        if (now - lastAttackTime < delayMs) return;
-
-        // 4. Сброс спринта (если включено)
-        if (sprintReset.isEnabled() && mc.player.isSprinting()) {
-            mc.player.setSprinting(false);
-        }
-
-        // 5. Дрожание прицела
-        float yaw = mc.player.getYaw();
-        float pitch = mc.player.getPitch();
-        float jitterYaw = (float) (jitterH.getValue() * (random.nextDouble() - 0.5) * 2);
-        float jitterPitch = (float) (jitterV.getValue() * (random.nextDouble() - 0.5) * 2);
-        mc.player.setYaw(yaw + jitterYaw);
-        mc.player.setPitch(pitch + jitterPitch);
-
-        // 6. Атака (без отводки)
-        mc.interactionManager.attackEntity(mc.player, target);
-
-        // 7. Восстанавливаем углы (чтобы не было постоянного дрейфа)
-        mc.player.setYaw(yaw);
-        mc.player.setPitch(pitch);
-
-        // 8. Обновляем время атаки
-        lastAttackTime = now;
-    }
-
-    private LivingEntity getTarget() {
-        Box box = mc.player.getBoundingBox().expand(range.getValue());
-        List<LivingEntity> entities = mc.world.getEntitiesByClass(LivingEntity.class, box,
-                e -> e != mc.player && e.isAlive() && !e.isDead());
-        entities.sort(Comparator.comparingDouble(e -> mc.player.distanceTo(e)));
-        return entities.isEmpty() ? null : entities.get(0);
-    }
+    // Настройки (жёстко заданы)
+    private static final double RANGE = 4.5;
+    private static final double MIN_DELAY = 0.680; // сек
+    private static final double MAX_DELAY = 0.740; // сек
+    private static final double JITTER_H = 3.0; // градусы
+    private static final double JITTER_V = 5.0; // градусы
+    private static final boolean SPRINT_RESET = true;
 
     @Override
-    public void onDisable() {
-        lastAttackTime = 0;
-        super.onDisable();
+    public void onInitialize() {
+        LOGGER.info("SpeedMod KillAura initialized.");
+
+        ClientTickEvents.END_CLIENT_TICK.register(client -> {
+            if (client.player == null || client.world == null) return;
+
+            // Поиск цели
+            LivingEntity target = getTarget(client);
+            if (target == null) return;
+
+            // Дистанция
+            double dist = client.player.distanceTo(target);
+            if (dist > RANGE) return;
+
+            // Задержка
+            long now = System.currentTimeMillis();
+            double delay = MIN_DELAY + (MAX_DELAY - MIN_DELAY) * random.nextDouble();
+            long delayMs = (long) (delay * 1000);
+            if (now - lastAttackTime < delayMs) return;
+
+            // Сброс спринта
+            if (SPRINT_RESET && client.player.isSprinting()) {
+                client.player.setSprinting(false);
+            }
+
+            // Дрожание прицела
+            float yaw = client.player.getYaw();
+            float pitch = client.player.getPitch();
+            float jitterYaw = (float) (JITTER_H * (random.nextDouble() - 0.5) * 2);
+            float jitterPitch = (float) (JITTER_V * (random.nextDouble() - 0.5) * 2);
+            client.player.setYaw(yaw + jitterYaw);
+            client.player.setPitch(pitch + jitterPitch);
+
+            // Атака
+            client.interactionManager.attackEntity(client.player, target);
+
+            // Восстанавливаем углы
+            client.player.setYaw(yaw);
+            client.player.setPitch(pitch);
+
+            lastAttackTime = now;
+        });
+    }
+
+    private LivingEntity getTarget(MinecraftClient client) {
+        Box box = client.player.getBoundingBox().expand(RANGE);
+        List<LivingEntity> entities = client.world.getEntitiesByClass(LivingEntity.class, box,
+                e -> e != client.player && e.isAlive() && !e.isDead());
+        entities.sort(Comparator.comparingDouble(e -> client.player.distanceTo(e)));
+        return entities.isEmpty() ? null : entities.get(0);
     }
 }
