@@ -5,11 +5,10 @@ import net.minecraft.client.MinecraftClient;
 import net.minecraft.entity.attribute.EntityAttributeInstance;
 import net.minecraft.entity.attribute.EntityAttributeModifier;
 import net.minecraft.entity.attribute.EntityAttributes;
+import net.minecraft.util.Identifier;
 import org.lwjgl.glfw.GLFW;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
-import java.util.UUID;
 
 public class SpeedMod implements ModInitializer {
     public static final String MOD_ID = "speedmod";
@@ -17,7 +16,7 @@ public class SpeedMod implements ModInitializer {
 
     private static boolean enabled = false;
     private static final double MULTIPLIER = 2.0;
-    private static final UUID MODIFIER_UUID = UUID.fromString("a1b2c3d4-e5f6-7890-abcd-ef1234567890");
+    private static final Identifier MODIFIER_ID = new Identifier("speedmod", "boost");
 
     private Thread keyThread;
     private volatile boolean running = true;
@@ -49,17 +48,21 @@ public class SpeedMod implements ModInitializer {
 
     private void updateSpeed(MinecraftClient client) {
         if (client.player == null) return;
-        EntityAttributeInstance speed = client.player.getAttributeInstance(EntityAttributes.GENERIC_MOVEMENT_SPEED);
+        EntityAttributeInstance speed = client.player.getAttributeInstance(EntityAttributes.MOVEMENT_SPEED);
         if (speed == null) return;
-        speed.removeModifier(MODIFIER_UUID);
+
+        // Удаляем старый модификатор по ID
+        speed.removeModifier(MODIFIER_ID);
+
         if (enabled) {
             double base = speed.getBaseValue();
-            speed.addPersistentModifier(new EntityAttributeModifier(
-                    MODIFIER_UUID,
-                    "SpeedBoost",
-                    base * MULTIPLIER - base,
+            double added = base * MULTIPLIER - base;
+            EntityAttributeModifier modifier = new EntityAttributeModifier(
+                    MODIFIER_ID,
+                    added,
                     EntityAttributeModifier.Operation.ADD_VALUE
-            ));
+            );
+            speed.addPersistentModifier(modifier);
         }
     }
 }
