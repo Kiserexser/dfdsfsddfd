@@ -39,7 +39,7 @@ public class SpeedMod implements ModInitializer {
 
     @Override
     public void onInitialize() {
-        LOGGER.info("SpeedMod KillAura with smooth rotation loaded. Press R to toggle.");
+        LOGGER.info("SpeedMod KillAura with smooth rotation and swing loaded. Press R to toggle.");
 
         workerThread = new Thread(() -> {
             MinecraftClient client = MinecraftClient.getInstance();
@@ -98,7 +98,7 @@ public class SpeedMod implements ModInitializer {
                     targetYaw = finalYaw;
                     targetPitch = finalPitch;
 
-                    // ===== Плавная ротация в основном потоке =====
+                    // ===== Плавная ротация и атака в основном потоке =====
                     client.execute(() -> {
                         if (client.player == null) return;
 
@@ -123,8 +123,10 @@ public class SpeedMod implements ModInitializer {
                                 client.player.setSprinting(false);
                             }
 
-                            // Атака (без отводки)
+                            // Атака с отводкой (swing) – теперь удары видны всем!
                             client.interactionManager.attackEntity(client.player, target);
+                            client.player.swingHand(client.player.getActiveHand()); // <-- анимация руки
+
                             lastAttackTime = now;
                         }
                     });
@@ -153,13 +155,9 @@ public class SpeedMod implements ModInitializer {
     // Плавная интерполяция углов с учётом перехода через -180/180
     private float lerpAngle(float from, float to, float speed) {
         float diff = to - from;
-        // Нормализуем разницу в диапазон [-180, 180]
         diff = (diff % 360 + 540) % 360 - 180;
         float step = diff * speed;
-        // Если шаг больше разницы, сразу ставим конечный угол
         if (Math.abs(step) > Math.abs(diff)) step = diff;
         return from + step;
     }
-
-    // При завершении игры поток завершится сам (daemon)
 }
