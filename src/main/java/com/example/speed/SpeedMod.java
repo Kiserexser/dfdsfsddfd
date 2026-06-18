@@ -5,7 +5,9 @@ import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.gui.widget.ButtonWidget;
+import net.minecraft.entity.EquipmentSlot;
 import net.minecraft.entity.LivingEntity;
+import net.minecraft.item.Items;
 import net.minecraft.sound.SoundEvents;
 import net.minecraft.text.Text;
 import net.minecraft.util.math.Box;
@@ -22,149 +24,103 @@ import java.util.Random;
 public class SpeedMod implements ModInitializer {
     public static final Logger LOGGER = LoggerFactory.getLogger("speedmod");
 
-    // === Жёсткие настройки (не редактируются) ===
-    private static final double RANGE = 4.5;
-    private static final double MIN_DELAY = 0.680;
-    private static final double MAX_DELAY = 0.700;
-    private static final boolean SPRINT_RESET = true;
-    private static final float SMOOTH_SPEED = 0.15f;
-    private static final boolean ENABLE_SHIFT = true;
-    private static final float SHIFT_DEGREES = 0.5f;
-    private static final long SHIFT_DURATION_MS = 3000;
-    private static final long RETURN_DURATION_MS = 2000;
-    private static final float JITTER_RANGE = 0.15f;
-
-    private static boolean enabled = false;
+    // === Общие настройки ===
     private static final Random random = new Random();
-    private long lastAttackTime = 0;
+    private static final MinecraftClient mc = MinecraftClient.getInstance();
 
+    // === Состояния модулей ===
+    private static boolean killAuraEnabled = false;
+    private static boolean flyEnabled = false;
+    private static boolean airStuckEnabled = false;
+
+    // === Параметры KillAura (фиксированные) ===
+    private static final double KA_RANGE = 4.5;
+    private static final double KA_MIN_DELAY = 0.680;
+    private static final double KA_MAX_DELAY = 0.700;
+    private static final boolean KA_SPRINT_RESET = true;
+    private static final float KA_SMOOTH_SPEED = 0.15f;
+    private static final boolean KA_ENABLE_SHIFT = true;
+    private static final float KA_SHIFT_DEGREES = 0.5f;
+    private static final long KA_SHIFT_DURATION_MS = 3000;
+    private static final long KA_RETURN_DURATION_MS = 2000;
+    private static final float KA_JITTER_RANGE = 0.15f;
+
+    private long kaLastAttackTime = 0;
+    private float kaTargetYaw = 0, kaTargetPitch = 0;
+    private long kaShiftCycleStart = System.currentTimeMillis();
+    private boolean kaIsShiftPhase = true;
+    private LivingEntity kaLockedTarget = null;
+
+    // === Параметры Fly (PolarFlyX) ===
+    private static final double FLY_HORIZONTAL_SPEED = 6.8;
+    private static final double FLY_MANUAL_VERTICAL_SPEED = 8.25;
+    private static final double FLY_CYCLE_VERTICAL_SPEED = 0.10;
+    private boolean flyGoingUp = true;
+
+    // === Параметры AirStuck ===
+    private static final double AIRSTUCK_SPEED = 0.2; // скорость движения вперёд
+
+    // === Флаги для дебаунса клавиш ===
+    private boolean wasR = false, wasF = false, wasG = false;
+    private boolean wasRightShift = false;
+
+    // === Поток ===
     private Thread workerThread;
     private volatile boolean running = true;
 
-    private float targetYaw = 0, targetPitch = 0;
-    private long shiftCycleStart = System.currentTimeMillis();
-    private boolean isShiftPhase = true;
-    private LivingEntity lockedTarget = null;
-
-    // Для синхронизации с GUI
-    private static boolean wasRightShiftPressed = false;
-
     @Override
     public void onInitialize() {
-        LOGGER.info("SpeedMod KillAura loaded. Press R or RIGHT SHIFT to toggle.");
+        LOGGER.info("SpeedMod loaded. R=KillAura, F=Fly, G=AirStuck, RightShift=GUI");
 
         workerThread = new Thread(() -> {
-            MinecraftClient client = MinecraftClient.getInstance();
             while (running) {
                 try {
-                    if (client != null && client.getWindow() != null) {
-                        long window = client.getWindow().getHandle();
+                    if (mc != null && mc.getWindow() != null) {
+                        long window = mc.getWindow().getHandle();
 
-                        // === Обработка R ===
-                        if (GLFW.glfwGetKey(window, GLFW.GLFW_KEY_R) == GLFW.GLFW_PRESS) {
-                            toggle();
-                            Thread.sleep(300);
-                        }
-
-                        // === Обработка правого Shift (открытие GUI) ===
+                        // === Обработка клавиш ===
+                        boolean rPressed = GLFW.glfwGetKey(window, GLFW.GLFW_KEY_R) == GLFW.GLFW_PRESS;
+                        boolean fPressed = GLFW.glfwGetKey(window, GLFW.GLFW_KEY_F) == GLFW.GLFW_PRESS;
+                        boolean gPressed = GLFW.glfwGetKey(window, GLFW.GLFW_KEY_G) == GLFW.GLFW_PRESS;
                         boolean rightShiftPressed = GLFW.glfwGetKey(window, GLFW.GLFW_KEY_RIGHT_SHIFT) == GLFW.GLFW_PRESS;
-                        if (rightShiftPressed && !wasRightShiftPressed) {
-                            client.execute(() -> client.setScreen(new KillAuraGUI()));
-                            wasRightShiftPressed = true;
+
+                        // Дебаунс для клавиш
+                        if (rPressed && !wasR) {
+                            toggleKillAura();
+                            wasR = true;
+                        } else if (!rPressed) wasR = false;
+
+                        if (fPressed && !wasF) {
+                            toggleFly();
+                            wasF = true;
+                        } else if (!fPressed) wasF = false;
+
+                        if (gPressed && !wasG) {
+                            toggleAirStuck();
+                            wasG = true;
+                        } else if (!gPressed) wasG = false;
+
+                        // Открытие GUI по правому Shift
+                        if (rightShiftPressed && !wasRightShift) {
+                            mc.execute(() -> mc.setScreen(new SpeedModGUI()));
+                            wasRightShift = true;
                         } else if (!rightShiftPressed) {
-                            wasRightShiftPressed = false;
+                            wasRightShift = false;
                         }
                     }
 
-                    if (!enabled || client == null || client.player == null || client.world == null) {
-                        Thread.sleep(50);
-                        continue;
+                    // === Выполнение активных модулей ===
+                    if (mc != null && mc.player != null && mc.world != null) {
+                        if (killAuraEnabled) updateKillAura();
+                        if (flyEnabled) updateFly();
+                        if (airStuckEnabled) updateAirStuck();
                     }
-
-                    // === Логика KillAura ===
-                    long now = System.currentTimeMillis();
-                    long elapsed = now - shiftCycleStart;
-                    if (isShiftPhase && elapsed >= SHIFT_DURATION_MS) {
-                        isShiftPhase = false;
-                        shiftCycleStart = now;
-                    } else if (!isShiftPhase && elapsed >= RETURN_DURATION_MS) {
-                        isShiftPhase = true;
-                        shiftCycleStart = now;
-                    }
-
-                    LivingEntity target = null;
-                    if (lockedTarget != null && lockedTarget.isAlive() && !lockedTarget.isDead()) {
-                        double dist = client.player.distanceTo(lockedTarget);
-                        if (dist <= RANGE) target = lockedTarget;
-                    }
-
-                    if (target == null) {
-                        lockedTarget = getTarget(client);
-                        target = lockedTarget;
-                    }
-
-                    if (target == null) {
-                        Thread.sleep(50);
-                        continue;
-                    }
-
-                    double dist = client.player.distanceTo(target);
-                    if (dist > RANGE) {
-                        lockedTarget = null;
-                        Thread.sleep(50);
-                        continue;
-                    }
-
-                    Vec3d eyePos = client.player.getEyePos();
-                    Vec3d targetPos = target.getPos().add(0, target.getHeight() * 0.5, 0);
-
-                    double dx = targetPos.x - eyePos.x;
-                    double dy = targetPos.y - eyePos.y;
-                    double dz = targetPos.z - eyePos.z;
-                    double distance = Math.sqrt(dx * dx + dz * dz);
-                    float yaw = (float) MathHelper.atan2(dz, dx) * (180F / (float) Math.PI) - 90F;
-                    float pitch = (float) -MathHelper.atan2(dy, distance) * (180F / (float) Math.PI);
-
-                    float jitterYaw = (random.nextFloat() - 0.5f) * JITTER_RANGE * 2;
-                    float jitterPitch = (random.nextFloat() - 0.5f) * JITTER_RANGE * 2;
-                    float shift = 0f;
-                    if (ENABLE_SHIFT && isShiftPhase) shift = SHIFT_DEGREES;
-
-                    targetYaw = yaw + jitterYaw;
-                    targetPitch = pitch + jitterPitch + shift;
-
-                    final LivingEntity finalTarget = target;
-                    final float finalYaw = targetYaw;
-                    final float finalPitch = targetPitch;
-
-                    client.execute(() -> {
-                        if (client.player == null) return;
-
-                        float currentYaw = client.player.getYaw();
-                        float currentPitch = client.player.getPitch();
-                        float newYaw = lerpAngle(currentYaw, finalYaw, SMOOTH_SPEED);
-                        float newPitch = lerpAngle(currentPitch, finalPitch, SMOOTH_SPEED);
-                        client.player.setYaw(newYaw);
-                        client.player.setPitch(newPitch);
-
-                        long now2 = System.currentTimeMillis();
-                        double delay = MIN_DELAY + (MAX_DELAY - MIN_DELAY) * random.nextDouble();
-                        long delayMs = (long) (delay * 1000);
-                        if (now2 - lastAttackTime >= delayMs && finalTarget.isAlive()) {
-                            if (SPRINT_RESET && client.player.isSprinting()) {
-                                client.player.setSprinting(false);
-                            }
-                            client.interactionManager.attackEntity(client.player, finalTarget);
-                            client.player.swingHand(client.player.getActiveHand());
-                            lastAttackTime = now2;
-                        }
-                    });
 
                     Thread.sleep(10);
                 } catch (InterruptedException ignored) {
                     break;
                 } catch (Exception e) {
-                    LOGGER.error("KillAura error", e);
+                    LOGGER.error("SpeedMod error", e);
                 }
             }
         });
@@ -172,30 +128,181 @@ public class SpeedMod implements ModInitializer {
         workerThread.start();
     }
 
-    private static void toggle() {
-        enabled = !enabled;
-        if (!enabled) {
-            // сброс цели при выключении
-            MinecraftClient client = MinecraftClient.getInstance();
-            if (client != null && client.player != null) {
-                client.player.sendMessage(Text.literal(enabled ? "§aKillAura ON" : "§cKillAura OFF"), true);
-            }
+    // ======================== KillAura ========================
+    private void toggleKillAura() {
+        killAuraEnabled = !killAuraEnabled;
+        if (!killAuraEnabled) kaLockedTarget = null;
+        LOGGER.info("KillAura: " + (killAuraEnabled ? "ON" : "OFF"));
+        mc.execute(() -> {
+            if (mc.player != null) mc.player.playSound(SoundEvents.UI_BUTTON_CLICK.value(), 1f, 1f);
+        });
+    }
+
+    private void updateKillAura() {
+        if (mc.player == null || mc.world == null) return;
+
+        long now = System.currentTimeMillis();
+        long elapsed = now - kaShiftCycleStart;
+        if (kaIsShiftPhase && elapsed >= KA_SHIFT_DURATION_MS) {
+            kaIsShiftPhase = false;
+            kaShiftCycleStart = now;
+        } else if (!kaIsShiftPhase && elapsed >= KA_RETURN_DURATION_MS) {
+            kaIsShiftPhase = true;
+            kaShiftCycleStart = now;
         }
-        LOGGER.info("KillAura: " + (enabled ? "ON" : "OFF"));
-        // Проигрываем звук через клиент
-        MinecraftClient.getInstance().execute(() -> {
-            if (MinecraftClient.getInstance().player != null) {
-                MinecraftClient.getInstance().player.playSound(SoundEvents.UI_BUTTON_CLICK.value(), 1.0f, 1.0f);
+
+        LivingEntity target = null;
+        if (kaLockedTarget != null && kaLockedTarget.isAlive() && !kaLockedTarget.isDead()) {
+            double dist = mc.player.distanceTo(kaLockedTarget);
+            if (dist <= KA_RANGE) target = kaLockedTarget;
+        }
+
+        if (target == null) {
+            kaLockedTarget = getTarget();
+            target = kaLockedTarget;
+        }
+        if (target == null) return;
+
+        double dist = mc.player.distanceTo(target);
+        if (dist > KA_RANGE) {
+            kaLockedTarget = null;
+            return;
+        }
+
+        Vec3d eyePos = mc.player.getEyePos();
+        Vec3d targetPos = target.getPos().add(0, target.getHeight() * 0.5, 0);
+
+        double dx = targetPos.x - eyePos.x;
+        double dy = targetPos.y - eyePos.y;
+        double dz = targetPos.z - eyePos.z;
+        double distance = Math.sqrt(dx * dx + dz * dz);
+        float yaw = (float) MathHelper.atan2(dz, dx) * (180F / (float) Math.PI) - 90F;
+        float pitch = (float) -MathHelper.atan2(dy, distance) * (180F / (float) Math.PI);
+
+        float jitterYaw = (random.nextFloat() - 0.5f) * KA_JITTER_RANGE * 2;
+        float jitterPitch = (random.nextFloat() - 0.5f) * KA_JITTER_RANGE * 2;
+        float shift = 0f;
+        if (KA_ENABLE_SHIFT && kaIsShiftPhase) shift = KA_SHIFT_DEGREES;
+
+        kaTargetYaw = yaw + jitterYaw;
+        kaTargetPitch = pitch + jitterPitch + shift;
+
+        final LivingEntity finalTarget = target;
+        final float finalYaw = kaTargetYaw;
+        final float finalPitch = kaTargetPitch;
+
+        mc.execute(() -> {
+            if (mc.player == null) return;
+            float currentYaw = mc.player.getYaw();
+            float currentPitch = mc.player.getPitch();
+            float newYaw = lerpAngle(currentYaw, finalYaw, KA_SMOOTH_SPEED);
+            float newPitch = lerpAngle(currentPitch, finalPitch, KA_SMOOTH_SPEED);
+            mc.player.setYaw(newYaw);
+            mc.player.setPitch(newPitch);
+
+            long now2 = System.currentTimeMillis();
+            double delay = KA_MIN_DELAY + (KA_MAX_DELAY - KA_MIN_DELAY) * random.nextDouble();
+            long delayMs = (long) (delay * 1000);
+            if (now2 - kaLastAttackTime >= delayMs && finalTarget.isAlive()) {
+                if (KA_SPRINT_RESET && mc.player.isSprinting()) mc.player.setSprinting(false);
+                mc.interactionManager.attackEntity(mc.player, finalTarget);
+                mc.player.swingHand(mc.player.getActiveHand());
+                kaLastAttackTime = now2;
             }
         });
     }
 
-    private LivingEntity getTarget(MinecraftClient client) {
+    // ======================== Fly (PolarFlyX) ========================
+    private void toggleFly() {
+        flyEnabled = !flyEnabled;
+        if (!flyEnabled) {
+            if (mc.player != null) mc.player.setVelocity(0, mc.player.getVelocity().y, 0);
+        }
+        LOGGER.info("Fly: " + (flyEnabled ? "ON" : "OFF"));
+        mc.execute(() -> {
+            if (mc.player != null) mc.player.playSound(SoundEvents.UI_BUTTON_CLICK.value(), 1f, 1f);
+        });
+    }
+
+    private void updateFly() {
+        if (mc.player == null) return;
+
+        // Активация элитр (как в оригинале)
+        if (mc.player != null && mc.player.getEquippedStack(EquipmentSlot.CHEST).getItem() == Items.ELYTRA) {
+            // Можно отправить пакет START_FALL_FLYING, но без сетевого – просто установим флаг
+            // В ванилле нет прямого метода, но можно использовать setFlag
+            // Вместо этого просто установим скорость
+        }
+
+        double yaw = Math.toRadians(mc.player.getYaw());
+        double motionX = 0, motionZ = 0, motionY = 0;
+
+        if (mc.options.forwardKey.isPressed()) {
+            motionX -= Math.sin(yaw) * FLY_HORIZONTAL_SPEED;
+            motionZ += Math.cos(yaw) * FLY_HORIZONTAL_SPEED;
+        }
+        if (mc.options.backKey.isPressed()) {
+            motionX += Math.sin(yaw) * FLY_HORIZONTAL_SPEED;
+            motionZ -= Math.cos(yaw) * FLY_HORIZONTAL_SPEED;
+        }
+        if (mc.options.leftKey.isPressed()) {
+            motionX -= Math.cos(yaw) * FLY_HORIZONTAL_SPEED;
+            motionZ -= Math.sin(yaw) * FLY_HORIZONTAL_SPEED;
+        }
+        if (mc.options.rightKey.isPressed()) {
+            motionX += Math.cos(yaw) * FLY_HORIZONTAL_SPEED;
+            motionZ += Math.sin(yaw) * FLY_HORIZONTAL_SPEED;
+        }
+
+        if (mc.options.jumpKey.isPressed()) {
+            motionY = FLY_MANUAL_VERTICAL_SPEED;
+        } else if (mc.options.sneakKey.isPressed()) {
+            motionY = -1.4;
+        } else {
+            motionY = flyGoingUp ? FLY_CYCLE_VERTICAL_SPEED : -FLY_CYCLE_VERTICAL_SPEED;
+            if (mc.player.age % 2 == 0) flyGoingUp = !flyGoingUp;
+        }
+
+        mc.player.fallDistance = 0f;
+        mc.player.setVelocity(motionX, motionY, motionZ);
+    }
+
+    // ======================== AirStuck ========================
+    private void toggleAirStuck() {
+        airStuckEnabled = !airStuckEnabled;
+        if (!airStuckEnabled && mc.player != null) {
+            mc.player.setVelocity(0, mc.player.getVelocity().y, 0);
+        }
+        LOGGER.info("AirStuck: " + (airStuckEnabled ? "ON" : "OFF"));
+        mc.execute(() -> {
+            if (mc.player != null) mc.player.playSound(SoundEvents.UI_BUTTON_CLICK.value(), 1f, 1f);
+        });
+    }
+
+    private void updateAirStuck() {
+        if (mc.player == null) return;
+
+        // Если игрок не в полёте (не глайдит)
+        if (!mc.player.isGliding()) {
+            if (mc.options.forwardKey.isPressed()) {
+                float yaw = mc.player.getYaw();
+                double motionX = -Math.sin(Math.toRadians(yaw)) * AIRSTUCK_SPEED;
+                double motionZ = Math.cos(Math.toRadians(yaw)) * AIRSTUCK_SPEED;
+                mc.player.setVelocity(motionX, 0, motionZ);
+            } else {
+                mc.player.setVelocity(0, 0, 0);
+            }
+        }
+        // Если глайдит – не блокируем, чтобы не мешать
+    }
+
+    // ======================== Вспомогательные методы ========================
+    private LivingEntity getTarget() {
         try {
-            Box box = client.player.getBoundingBox().expand(RANGE);
-            List<LivingEntity> entities = client.world.getEntitiesByClass(LivingEntity.class, box,
-                    e -> e != client.player && e.isAlive() && !e.isDead());
-            entities.sort(Comparator.comparingDouble(e -> client.player.distanceTo(e)));
+            Box box = mc.player.getBoundingBox().expand(KA_RANGE);
+            List<LivingEntity> entities = mc.world.getEntitiesByClass(LivingEntity.class, box,
+                    e -> e != mc.player && e.isAlive() && !e.isDead());
+            entities.sort(Comparator.comparingDouble(e -> mc.player.distanceTo(e)));
             return entities.isEmpty() ? null : entities.get(0);
         } catch (Exception e) {
             return null;
@@ -210,14 +317,13 @@ public class SpeedMod implements ModInitializer {
         return from + step;
     }
 
-    // =================== GUI (только On/Off) ===================
-    private static class KillAuraGUI extends Screen {
-        private static final int WIDTH = 160;
-        private static final int HEIGHT = 90;
+    // ======================== GUI (статус всех модулей) ========================
+    private static class SpeedModGUI extends Screen {
+        private static final int WIDTH = 180;
+        private static final int HEIGHT = 140;
         private int x, y;
-        private ButtonWidget toggleButton;
 
-        protected KillAuraGUI() {
+        protected SpeedModGUI() {
             super(Text.literal("SpeedMod"));
         }
 
@@ -227,19 +333,34 @@ public class SpeedMod implements ModInitializer {
             this.x = (this.width - WIDTH) / 2;
             this.y = (this.height - HEIGHT) / 2;
 
-            toggleButton = ButtonWidget.builder(
-                    Text.literal(enabled ? "§aВКЛ" : "§cВЫКЛ"),
-                    btn -> {
-                        toggle(); // переключаем состояние через тот же метод
-                        toggleButton.setMessage(Text.literal(enabled ? "§aВКЛ" : "§cВЫКЛ"));
-                    }
-            ).dimensions(x + 30, y + 40, 100, 20).build();
-            this.addDrawableChild(toggleButton);
+            // Кнопки для каждого модуля (просто показываем статус, переключение через клавиши)
+            ButtonWidget killAuraBtn = ButtonWidget.builder(
+                    Text.literal("KillAura: " + (killAuraEnabled ? "§aON" : "§cOFF")),
+                    btn -> toggleKillAura()
+            ).dimensions(x + 10, y + 30, 160, 20).build();
+            this.addDrawableChild(killAuraBtn);
+
+            ButtonWidget flyBtn = ButtonWidget.builder(
+                    Text.literal("Fly: " + (flyEnabled ? "§aON" : "§cOFF")),
+                    btn -> toggleFly()
+            ).dimensions(x + 10, y + 60, 160, 20).build();
+            this.addDrawableChild(flyBtn);
+
+            ButtonWidget airStuckBtn = ButtonWidget.builder(
+                    Text.literal("AirStuck: " + (airStuckEnabled ? "§aON" : "§cOFF")),
+                    btn -> toggleAirStuck()
+            ).dimensions(x + 10, y + 90, 160, 20).build();
+            this.addDrawableChild(airStuckBtn);
+
+            ButtonWidget closeBtn = ButtonWidget.builder(
+                    Text.literal("Закрыть"),
+                    btn -> this.close()
+            ).dimensions(x + 55, y + HEIGHT - 25, 70, 20).build();
+            this.addDrawableChild(closeBtn);
         }
 
         @Override
         public void render(DrawContext context, int mouseX, int mouseY, float delta) {
-            // Белый фон с розовой рамкой
             int bgColor = 0xFFFFFF;
             int borderColor = 0xFFB6C1;
             int textColor = 0xFF69B4;
@@ -250,8 +371,7 @@ public class SpeedMod implements ModInitializer {
             context.fill(x, y, x + 1, y + HEIGHT, borderColor);
             context.fill(x + WIDTH - 1, y, x + WIDTH, y + HEIGHT, borderColor);
 
-            context.drawCenteredTextWithShadow(textRenderer, Text.literal("§dKillAura"), x + WIDTH/2, y + 10, textColor);
-            context.drawCenteredTextWithShadow(textRenderer, Text.literal(enabled ? "§aВключена" : "§cВыключена"), x + WIDTH/2, y + 25, textColor);
+            context.drawCenteredTextWithShadow(textRenderer, Text.literal("§dSpeedMod Controls"), x + WIDTH/2, y + 8, textColor);
 
             super.render(context, mouseX, mouseY, delta);
         }
