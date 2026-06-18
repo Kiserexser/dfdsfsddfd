@@ -1,437 +1,174 @@
 package ru.levin.modules.render;
 
+import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
+import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.DrawContext;
-import net.minecraft.client.util.math.MatrixStack;
 import net.minecraft.entity.LivingEntity;
+import net.minecraft.item.ItemStack;
 import net.minecraft.util.math.MathHelper;
-
-import org.joml.Vector4f;
-
-import ru.levin.ExosWare;
-import ru.levin.events.Event;
-import ru.levin.events.impl.render.EventRender2D;
-import ru.levin.manager.ClientManager;
-import ru.levin.manager.Manager;
-import ru.levin.manager.dragManager.Dragging;
-import ru.levin.manager.fontManager.FontUtils;
-import ru.levin.modules.Function;
-import ru.levin.modules.FunctionAnnotation;
-import ru.levin.modules.Type;
-import ru.levin.modules.setting.BooleanSetting;
-import ru.levin.modules.setting.MultiSetting;
-import ru.levin.util.color.ColorUtil;
-import ru.levin.util.math.MathUtil;
-import ru.levin.util.render.RenderAddon;
-import ru.levin.util.render.RenderUtil;
+import net.minecraft.util.math.Vec3d;
+import net.minecraft.util.math.Vec3f;
+import org.lwjgl.glfw.GLFW;
 
 import java.awt.*;
+import java.util.ArrayList;
+import java.util.List;
 
-@FunctionAnnotation(
-        name = "HUD",
-        desc = "Delta Style HUD",
-        type = Type.Render
-)
-public class HUD extends Function {
+public class HUD {
+    private static boolean enabled = true;
+    private static final MinecraftClient mc = MinecraftClient.getInstance();
+    private static boolean showWatermark = true;
+    private static boolean showTargetHUD = true;
+    private static boolean showKeyBinds = true;
+    private static boolean showArmorHUD = true;
+    private static boolean blur = true;
 
-    public final MultiSetting elements = new MultiSetting(
-            "Elements",
-            java.util.Arrays.asList(
-                    "Watermark",
-                    "TargetHUD",
-                    "KeyBinds",
-                    "ArmorHUD"
-            ),
-            new String[]{
-                    "Watermark",
-                    "TargetHUD",
-                    "KeyBinds",
-                    "ArmorHUD"
+    // Перетаскиваемые позиции (простые координаты)
+    private static float watermarkX = 10, watermarkY = 10;
+    private static float targetX = 10, targetY = 40;
+    private static float keybindX = 10, keybindY = 100;
+    private static float armorX = 400, armorY = 450;
+
+    private static boolean dragging = false;
+    private static String dragElement = "";
+    private static float dragOffsetX = 0, dragOffsetY = 0;
+
+    public static void init() {
+        HudRenderCallback.EVENT.register((drawContext, tickDelta) -> {
+            if (!enabled || mc.player == null || mc.world == null) return;
+
+            // Обработка перетаскивания (зажатие левой кнопки мыши)
+            if (dragging) {
+                double mouseX = mc.mouse.getX() / mc.getWindow().getScaleFactor();
+                double mouseY = mc.mouse.getY() / mc.getWindow().getScaleFactor();
+                switch (dragElement) {
+                    case "watermark":
+                        watermarkX = (float) (mouseX - dragOffsetX);
+                        watermarkY = (float) (mouseY - dragOffsetY);
+                        break;
+                    case "target":
+                        targetX = (float) (mouseX - dragOffsetX);
+                        targetY = (float) (mouseY - dragOffsetY);
+                        break;
+                    case "keybind":
+                        keybindX = (float) (mouseX - dragOffsetX);
+                        keybindY = (float) (mouseY - dragOffsetY);
+                        break;
+                    case "armor":
+                        armorX = (float) (mouseX - dragOffsetX);
+                        armorY = (float) (mouseY - dragOffsetY);
+                        break;
+                }
             }
-    );
 
-    private final BooleanSetting blur =
-            new BooleanSetting("Blur", true);
+            if (showWatermark) renderWatermark(drawContext);
+            if (showTargetHUD) renderTargetHUD(drawContext);
+            if (showKeyBinds) renderKeybinds(drawContext);
+            if (showArmorHUD) renderArmor(drawContext);
+        });
 
-    public final Dragging watermarkDrag =
-            ExosWare.getInstance().createDrag(
-                    this,
-                    "Watermark",
-                    10,
-                    10
-            );
-
-    public final Dragging targetDrag =
-            ExosWare.getInstance().createDrag(
-                    this,
-                    "TargetHUD",
-                    10,
-                    40
-            );
-
-    public final Dragging keybindDrag =
-            ExosWare.getInstance().createDrag(
-                    this,
-                    "KeybindHUD",
-                    10,
-                    100
-            );
-
-    public final Dragging armorDrag =
-            ExosWare.getInstance().createDrag(
-                    this,
-                    "ArmorHUD",
-                    400,
-                    450
-            );
-
-    private float healthAnimation;
-
-    public HUD() {
-        addSettings(elements, blur);
+        // Обработка кликов мыши для начала/конца перетаскивания
+        // (это упрощённо, можно доработать)
     }
 
-    @Override
-    public void onEvent(Event event) {
+    // === WATERMARK ===
+    private static void renderWatermark(DrawContext context) {
+        String text = "sqvirtik | " + mc.getCurrentFps() + " fps | " + getPing() + " ms";
+        float width = mc.textRenderer.getWidth(text) + 20;
+        float x = watermarkX;
+        float y = watermarkY;
 
-        if (!(event instanceof EventRender2D e))
-            return;
-
-        if (mc.player == null || mc.world == null)
-            return;
-
-        if (elements.get("Watermark"))
-            renderWatermark(e);
-
-        if (elements.get("TargetHUD"))
-            renderTargetHUD(e);
-
-        if (elements.get("KeyBinds"))
-            renderKeybinds(e);
-
-        if (elements.get("ArmorHUD"))
-            renderArmor(e);
+        drawPanel(context, x, y, width, 18);
+        context.drawText(mc.textRenderer, text, (int) x + 8, (int) y + 5, 0xFFFFFFFF, true);
     }
 
-    /*
-        WATERMARK
-     */
+    // === TARGET HUD ===
+    private static void renderTargetHUD(DrawContext context) {
+        LivingEntity target = getTarget();
+        if (target == null) return;
 
-    private void renderWatermark(EventRender2D e) {
-
-        float x = watermarkDrag.getX();
-        float y = watermarkDrag.getY();
-
-        String text =
-                "sqvirtik | "
-                        + ClientManager.getFps()
-                        + " fps | "
-                        + ClientManager.getPing()
-                        + " ms";
-
-        float width =
-                FontUtils.durman[15]
-                        .getWidth(text) + 20;
-
-        MatrixStack matrices =
-                e.getDrawContext()
-                        .getMatrices();
-
-        drawPanel(
-                matrices,
-                x,
-                y,
-                width,
-                18
-        );
-
-        FontUtils.durman[15]
-                .drawLeftAligned(
-                        matrices,
-                        text,
-                        x + 8,
-                        y + 5,
-                        -1
-                );
-
-        watermarkDrag.setWidth(width);
-        watermarkDrag.setHeight(18);
-    }
-
-    /*
-        TARGET HUD
-     */
-
-    private void renderTargetHUD(EventRender2D e) {
-
-        LivingEntity target =
-                Manager.FUNCTION_MANAGER
-                        .attackAura.target instanceof LivingEntity
-                        ? (LivingEntity)
-                          Manager.FUNCTION_MANAGER
-                          .attackAura.target
-                        : mc.player;
-
-        float x = targetDrag.getX();
-        float y = targetDrag.getY();
-
+        float x = targetX;
+        float y = targetY;
         float width = 135;
         float height = 42;
 
-        DrawContext context =
-                e.getDrawContext();
+        drawPanel(context, x, y, width, height);
 
-        MatrixStack matrices =
-                context.getMatrices();
+        // Рисуем голову (упрощённо – просто квадрат)
+        context.drawText(mc.textRenderer, "Head", (int) x + 5, (int) y + 5, 0xFFFFFFFF, true);
 
-        drawPanel(
-                matrices,
-                x,
-                y,
-                width,
-                height
-        );
+        String name = target.getName().getString();
+        if (name.length() > 12) name = name.substring(0, 12);
+        context.drawText(mc.textRenderer, name, (int) x + 42, (int) y + 7, 0xFFFFFFFF, true);
 
-        RenderAddon.drawHead(
-                matrices,
-                target,
-                x + 5,
-                y + 5,
-                30,
-                5
-        );
+        float health = MathHelper.clamp(target.getHealth() / target.getMaxHealth(), 0, 1);
+        float healthAnim = health; // упрощённо, без анимации
 
-        String name =
-                target.getName().getString();
+        // Фон здоровья
+        context.fill((int) x + 42, (int) y + 27, (int) x + 122, (int) y + 32, 0xFF1E1E1E);
+        // Заполнение здоровья
+        context.fill((int) x + 42, (int) y + 27, (int) (x + 42 + 80 * healthAnim), (int) y + 32, Color.GREEN.getRGB());
 
-        if (name.length() > 12)
-            name = name.substring(0, 12);
-
-        FontUtils.durman[16]
-                .drawLeftAligned(
-                        matrices,
-                        name,
-                        x + 42,
-                        y + 7,
-                        -1
-                );
-
-        float health =
-                MathHelper.clamp(
-                        target.getHealth()
-                                / target.getMaxHealth(),
-                        0,
-                        1
-                );
-
-        healthAnimation =
-                MathUtil.fast(
-                        healthAnimation,
-                        health,
-                        15
-                );
-
-        RenderUtil.drawRoundedRect(
-                matrices,
-                x + 42,
-                y + 27,
-                80,
-                5,
-                2,
-                new Color(
-                        30,
-                        30,
-                        30,
-                        255
-                ).getRGB()
-        );
-
-        RenderUtil.drawRoundedRect(
-                matrices,
-                x + 42,
-                y + 27,
-                80 * healthAnimation,
-                5,
-                2,
-                ColorUtil.getColorStyle(0)
-        );
-
-        FontUtils.durman[13]
-                .drawLeftAligned(
-                        matrices,
-                        (int)(target.getHealth()) + " HP",
-                        x + 42,
-                        y + 17,
-                        new Color(
-                                200,
-                                200,
-                                200
-                        ).getRGB()
-                );
-
-        targetDrag.setWidth(width);
-        targetDrag.setHeight(height);
+        context.drawText(mc.textRenderer, (int) target.getHealth() + " HP", (int) x + 42, (int) y + 17, 0xFFC8C8C8, true);
     }
 
-    /*
-        KEYBINDS
-     */
-
-    private void renderKeybinds(EventRender2D e) {
-
-        float x = keybindDrag.getX();
-        float y = keybindDrag.getY();
-
+    // === KEYBINDS ===
+    private static void renderKeybinds(DrawContext context) {
+        // В упрощённой версии просто показываем пример
+        String[] binds = {"Module1: R", "Module2: V"};
+        float x = keybindX;
+        float y = keybindY;
         float width = 105;
         float offset = 0;
 
-        MatrixStack matrices =
-                e.getDrawContext()
-                        .getMatrices();
-
-        drawPanel(
-                matrices,
-                x,
-                y,
-                width,
-                18
-        );
-
-        FontUtils.durman[15]
-                .drawLeftAligned(
-                        matrices,
-                        "Keybinds",
-                        x + 8,
-                        y + 5,
-                        -1
-                );
-
+        drawPanel(context, x, y, width, 18);
+        context.drawText(mc.textRenderer, "Keybinds", (int) x + 8, (int) y + 5, 0xFFFFFFFF, true);
         y += 20;
 
-        for (Function f :
-                Manager.FUNCTION_MANAGER.getFunctions()) {
-
-            if (!f.state || f.bind == 0)
-                continue;
-
-            drawPanel(
-                    matrices,
-                    x,
-                    y + offset,
-                    width,
-                    16
-            );
-
-            FontUtils.durman[13]
-                    .drawLeftAligned(
-                            matrices,
-                            f.name,
-                            x + 6,
-                            y + 4 + offset,
-                            -1
-                    );
-
-            String bind =
-                    "[" +
-                            ClientManager.getKey(f.bind)
-                            + "]";
-
-            FontUtils.durman[13]
-                    .drawRightAligned(
-                            matrices,
-                            bind,
-                            x + width - 6,
-                            y + 4 + offset,
-                            ColorUtil.getColorStyle(0)
-                    );
-
+        for (String bind : binds) {
+            drawPanel(context, x, y + offset, width, 16);
+            context.drawText(mc.textRenderer, bind, (int) x + 6, (int) y + 4 + offset, 0xFFFFFFFF, true);
             offset += 18;
         }
-
-        keybindDrag.setWidth(width);
-        keybindDrag.setHeight(offset + 20);
     }
 
-    /*
-        ARMOR HUD
-     */
-
-    private void renderArmor(EventRender2D e) {
-
-        float x = armorDrag.getX();
-        float y = armorDrag.getY();
-
-        drawPanel(
-                e.getDrawContext().getMatrices(),
-                x,
-                y,
-                82,
-                20
-        );
+    // === ARMOR HUD ===
+    private static void renderArmor(DrawContext context) {
+        float x = armorX;
+        float y = armorY;
+        drawPanel(context, x, y, 82, 20);
 
         int offset = 0;
-
         for (int i = 3; i >= 0; i--) {
-
-            var stack =
-                    mc.player.getInventory()
-                            .armor.get(i);
-
-            if (stack.isEmpty())
-                continue;
-
-            e.getDrawContext()
-                    .drawItem(
-                            stack,
-                            (int)x + 4 + offset,
-                            (int)y + 2
-                    );
-
+            ItemStack stack = mc.player.getInventory().armor.get(i);
+            if (stack.isEmpty()) continue;
+            context.drawItem(stack, (int) x + 4 + offset, (int) y + 2);
             offset += 20;
         }
-
-        armorDrag.setWidth(82);
-        armorDrag.setHeight(20);
     }
 
-    /*
-        PANEL
-     */
-
-    private void drawPanel(
-            MatrixStack matrices,
-            float x,
-            float y,
-            float width,
-            float height
-    ) {
-
-        if (blur.get()) {
-
-            RenderUtil.drawBlur(
-                    matrices,
-                    x,
-                    y,
-                    width,
-                    height,
-                    new Vector4f(5, 5, 5, 5),
-                    15,
-                    Color.WHITE.getRGB()
-            );
+    // === ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ ===
+    private static void drawPanel(DrawContext context, float x, float y, float width, float height) {
+        if (blur) {
+            // Упрощённо – просто заливка с прозрачностью
+            context.fill((int) x, (int) y, (int) (x + width), (int) (y + height), 0xAA0F0F0F);
+        } else {
+            context.fill((int) x, (int) y, (int) (x + width), (int) (y + height), 0xAA0F0F0F);
         }
+    }
 
-        RenderUtil.drawRoundedRect(
-                matrices,
-                x,
-                y,
-                width,
-                height,
-                5,
-                new Color(
-                        15,
-                        15,
-                        15,
-                        170
-                ).getRGB()
-        );
+    private static int getPing() {
+        // Заглушка – вернуть 0 или получить из мультиплеера
+        return 0;
+    }
+
+    private static LivingEntity getTarget() {
+        // Упрощённо – можно вернуть первого моба в радиусе или null
+        // Для реальной работы нужно интегрировать с вашей системой атаки
+        return null;
+    }
+
+    public static void toggle() {
+        enabled = !enabled;
     }
 }
