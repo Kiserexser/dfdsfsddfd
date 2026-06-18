@@ -5,7 +5,6 @@ import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.gui.widget.ButtonWidget;
-import net.minecraft.client.gui.widget.SliderWidget;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.sound.SoundEvents;
 import net.minecraft.text.Text;
@@ -190,15 +189,17 @@ public class SpeedMod implements ModInitializer {
     // =================== GUI ===================
     private static class SettingsGUI extends Screen {
         private static final int WIDTH = 230;
-        private static final int HEIGHT = 300;
+        private static final int HEIGHT = 320;
         private int x, y;
 
         private ButtonWidget toggleButton;
-        private SliderWidget rangeSlider;
-        private SliderWidget minDelaySlider;
-        private SliderWidget maxDelaySlider;
-        private SliderWidget jitterSlider;
-        private SliderWidget shiftSlider;
+
+        // Кнопки для изменения параметров
+        private ButtonWidget rangeDec, rangeInc;
+        private ButtonWidget minDelayDec, minDelayInc;
+        private ButtonWidget maxDelayDec, maxDelayInc;
+        private ButtonWidget jitterDec, jitterInc;
+        private ButtonWidget shiftDec, shiftInc;
         private ButtonWidget sprintToggle;
         private ButtonWidget shiftToggle;
 
@@ -212,7 +213,7 @@ public class SpeedMod implements ModInitializer {
             this.x = (this.width - WIDTH) / 2;
             this.y = (this.height - HEIGHT) / 2;
 
-            // === Кнопка On/Off ===
+            // On/Off
             toggleButton = ButtonWidget.builder(
                     Text.literal(ENABLED ? "§aON" : "§cOFF"),
                     btn -> {
@@ -225,114 +226,81 @@ public class SpeedMod implements ModInitializer {
             ).dimensions(x + 10, y + 25, 60, 20).build();
             this.addDrawableChild(toggleButton);
 
-            // === Радиус ===
-            rangeSlider = new SliderWidget(x + 10, y + 55, 200, 20, Text.literal("Радиус: " + RANGE), RANGE) {
-                @Override
-                protected void updateMessage() {
-                    this.setMessage(Text.literal("Радиус: " + String.format("%.1f", value)));
-                }
-                @Override
-                protected void applyValue() {
-                    RANGE = value;
-                }
-                @Override
-                public double getMinValue() {
-                    return 1.0;
-                }
-                @Override
-                public double getMaxValue() {
-                    return 8.0;
-                }
-            };
-            this.addDrawableChild(rangeSlider);
+            // Радиус
+            addLabelAndButtons("Радиус", RANGE, 0.1, 1.0, 8.0, 
+                    val -> { RANGE = val; }, 
+                    y + 55, 
+                    (rangeDec = new ButtonWidget(x + 80, y + 55, 20, 20, Text.literal("-"), btn -> {
+                        RANGE = Math.max(1.0, RANGE - 0.1);
+                    })),
+                    (rangeInc = new ButtonWidget(x + 110, y + 55, 20, 20, Text.literal("+"), btn -> {
+                        RANGE = Math.min(8.0, RANGE + 0.1);
+                    }))
+            );
+            this.addDrawableChild(rangeDec);
+            this.addDrawableChild(rangeInc);
 
-            // === Мин. задержка ===
-            minDelaySlider = new SliderWidget(x + 10, y + 80, 200, 20, Text.literal("Мин. задержка: " + MIN_DELAY), MIN_DELAY) {
-                @Override
-                protected void updateMessage() {
-                    this.setMessage(Text.literal("Мин. задержка: " + String.format("%.3f", value)));
-                }
-                @Override
-                protected void applyValue() {
-                    MIN_DELAY = value;
-                    if (MIN_DELAY > MAX_DELAY) MAX_DELAY = MIN_DELAY;
-                }
-                @Override
-                public double getMinValue() {
-                    return 0.1;
-                }
-                @Override
-                public double getMaxValue() {
-                    return 1.0;
-                }
-            };
-            this.addDrawableChild(minDelaySlider);
+            // Мин. задержка
+            addLabelAndButtons("Мин. задержка", MIN_DELAY, 0.005, 0.1, 1.0,
+                    val -> { MIN_DELAY = val; if (MIN_DELAY > MAX_DELAY) MAX_DELAY = MIN_DELAY; },
+                    y + 80,
+                    (minDelayDec = new ButtonWidget(x + 110, y + 80, 20, 20, Text.literal("-"), btn -> {
+                        MIN_DELAY = Math.max(0.1, MIN_DELAY - 0.005);
+                        if (MIN_DELAY > MAX_DELAY) MAX_DELAY = MIN_DELAY;
+                    })),
+                    (minDelayInc = new ButtonWidget(x + 140, y + 80, 20, 20, Text.literal("+"), btn -> {
+                        MIN_DELAY = Math.min(1.0, MIN_DELAY + 0.005);
+                        if (MIN_DELAY > MAX_DELAY) MAX_DELAY = MIN_DELAY;
+                    }))
+            );
+            this.addDrawableChild(minDelayDec);
+            this.addDrawableChild(minDelayInc);
 
-            // === Макс. задержка ===
-            maxDelaySlider = new SliderWidget(x + 10, y + 105, 200, 20, Text.literal("Макс. задержка: " + MAX_DELAY), MAX_DELAY) {
-                @Override
-                protected void updateMessage() {
-                    this.setMessage(Text.literal("Макс. задержка: " + String.format("%.3f", value)));
-                }
-                @Override
-                protected void applyValue() {
-                    MAX_DELAY = value;
-                    if (MAX_DELAY < MIN_DELAY) MIN_DELAY = MAX_DELAY;
-                }
-                @Override
-                public double getMinValue() {
-                    return 0.1;
-                }
-                @Override
-                public double getMaxValue() {
-                    return 1.0;
-                }
-            };
-            this.addDrawableChild(maxDelaySlider);
+            // Макс. задержка
+            addLabelAndButtons("Макс. задержка", MAX_DELAY, 0.005, 0.1, 1.0,
+                    val -> { MAX_DELAY = val; if (MAX_DELAY < MIN_DELAY) MIN_DELAY = MAX_DELAY; },
+                    y + 105,
+                    (maxDelayDec = new ButtonWidget(x + 110, y + 105, 20, 20, Text.literal("-"), btn -> {
+                        MAX_DELAY = Math.max(0.1, MAX_DELAY - 0.005);
+                        if (MAX_DELAY < MIN_DELAY) MIN_DELAY = MAX_DELAY;
+                    })),
+                    (maxDelayInc = new ButtonWidget(x + 140, y + 105, 20, 20, Text.literal("+"), btn -> {
+                        MAX_DELAY = Math.min(1.0, MAX_DELAY + 0.005);
+                        if (MAX_DELAY < MIN_DELAY) MIN_DELAY = MAX_DELAY;
+                    }))
+            );
+            this.addDrawableChild(maxDelayDec);
+            this.addDrawableChild(maxDelayInc);
 
-            // === Джиттер ===
-            jitterSlider = new SliderWidget(x + 10, y + 130, 200, 20, Text.literal("Джиттер: " + JITTER_RANGE), JITTER_RANGE) {
-                @Override
-                protected void updateMessage() {
-                    this.setMessage(Text.literal("Джиттер: " + String.format("%.2f", value)));
-                }
-                @Override
-                protected void applyValue() {
-                    JITTER_RANGE = (float) value;
-                }
-                @Override
-                public double getMinValue() {
-                    return 0.0;
-                }
-                @Override
-                public double getMaxValue() {
-                    return 1.0;
-                }
-            };
-            this.addDrawableChild(jitterSlider);
+            // Джиттер
+            addLabelAndButtons("Джиттер", JITTER_RANGE, 0.01, 0.0, 1.0,
+                    val -> { JITTER_RANGE = (float) val; },
+                    y + 130,
+                    (jitterDec = new ButtonWidget(x + 110, y + 130, 20, 20, Text.literal("-"), btn -> {
+                        JITTER_RANGE = (float) Math.max(0.0, JITTER_RANGE - 0.01);
+                    })),
+                    (jitterInc = new ButtonWidget(x + 140, y + 130, 20, 20, Text.literal("+"), btn -> {
+                        JITTER_RANGE = (float) Math.min(1.0, JITTER_RANGE + 0.01);
+                    }))
+            );
+            this.addDrawableChild(jitterDec);
+            this.addDrawableChild(jitterInc);
 
-            // === Смещение ===
-            shiftSlider = new SliderWidget(x + 10, y + 155, 200, 20, Text.literal("Смещение: " + SHIFT_DEGREES + "°"), SHIFT_DEGREES) {
-                @Override
-                protected void updateMessage() {
-                    this.setMessage(Text.literal("Смещение: " + String.format("%.2f", value) + "°"));
-                }
-                @Override
-                protected void applyValue() {
-                    SHIFT_DEGREES = (float) value;
-                }
-                @Override
-                public double getMinValue() {
-                    return 0.0;
-                }
-                @Override
-                public double getMaxValue() {
-                    return 1.0;
-                }
-            };
-            this.addDrawableChild(shiftSlider);
+            // Смещение
+            addLabelAndButtons("Смещение", SHIFT_DEGREES, 0.05, 0.0, 1.0,
+                    val -> { SHIFT_DEGREES = (float) val; },
+                    y + 155,
+                    (shiftDec = new ButtonWidget(x + 110, y + 155, 20, 20, Text.literal("-"), btn -> {
+                        SHIFT_DEGREES = (float) Math.max(0.0, SHIFT_DEGREES - 0.05);
+                    })),
+                    (shiftInc = new ButtonWidget(x + 140, y + 155, 20, 20, Text.literal("+"), btn -> {
+                        SHIFT_DEGREES = (float) Math.min(1.0, SHIFT_DEGREES + 0.05);
+                    }))
+            );
+            this.addDrawableChild(shiftDec);
+            this.addDrawableChild(shiftInc);
 
-            // === Сброс спринта (кнопка-переключатель) ===
+            // Сброс спринта (кнопка-переключатель)
             sprintToggle = ButtonWidget.builder(
                     Text.literal(SPRINT_RESET ? "§aСброс спринта Вкл" : "§cСброс спринта Выкл"),
                     btn -> {
@@ -342,7 +310,7 @@ public class SpeedMod implements ModInitializer {
             ).dimensions(x + 10, y + 180, 140, 20).build();
             this.addDrawableChild(sprintToggle);
 
-            // === Смещение вкл/выкл (кнопка-переключатель) ===
+            // Смещение вкл/выкл
             shiftToggle = ButtonWidget.builder(
                     Text.literal(ENABLE_SHIFT ? "§aСмещение Вкл" : "§cСмещение Выкл"),
                     btn -> {
@@ -352,12 +320,18 @@ public class SpeedMod implements ModInitializer {
             ).dimensions(x + 10, y + 205, 140, 20).build();
             this.addDrawableChild(shiftToggle);
 
-            // === Кнопка "Закрыть" ===
+            // Закрыть
             ButtonWidget closeButton = ButtonWidget.builder(
                     Text.literal("Закрыть"),
                     btn -> this.close()
             ).dimensions(x + 80, y + HEIGHT - 30, 70, 20).build();
             this.addDrawableChild(closeButton);
+        }
+
+        // Вспомогательный метод для отображения текста
+        private void addLabelAndButtons(String label, double value, double step, double min, double max, java.util.function.DoubleConsumer setter, int yPos, ButtonWidget dec, ButtonWidget inc) {
+            // Здесь не делаем ничего, просто рисуем текст в render
+            // Но добавим кнопки уже созданы
         }
 
         @Override
@@ -375,7 +349,19 @@ public class SpeedMod implements ModInitializer {
             context.drawCenteredTextWithShadow(textRenderer, Text.literal("§dCombat"), x + WIDTH/2, y + 5, textColor);
             context.drawTextWithShadow(textRenderer, Text.literal("§dKillAura"), x + 15, y + 28, textColor);
 
+            // Отображаем значения параметров
+            drawLabelValue(context, "Радиус", RANGE, 1, 55);
+            drawLabelValue(context, "Мин. задержка", MIN_DELAY, 1, 80);
+            drawLabelValue(context, "Макс. задержка", MAX_DELAY, 1, 105);
+            drawLabelValue(context, "Джиттер", JITTER_RANGE, 1, 130);
+            drawLabelValue(context, "Смещение", SHIFT_DEGREES, 1, 155);
+
             super.render(context, mouseX, mouseY, delta);
+        }
+
+        private void drawLabelValue(DrawContext context, String label, double value, int col, int row) {
+            String text = label + ": " + String.format("%.2f", value);
+            context.drawTextWithShadow(textRenderer, Text.literal(text), x + 10, y + row + 5, 0x333333);
         }
 
         @Override
