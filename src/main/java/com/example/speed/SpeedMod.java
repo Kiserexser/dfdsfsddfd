@@ -120,7 +120,8 @@ public class SpeedMod implements ModInitializer {
 
     // ======================== Slap ========================
     private void updateSlap() {
-        if (mc.player.isInWater()) return;
+        // Исправлено: isInWater() → isTouchingWater()
+        if (mc.player.isTouchingWater()) return;
 
         int slot = findSlabInHotbar();
         if (slot == -1) {
@@ -158,7 +159,6 @@ public class SpeedMod implements ModInitializer {
                     && !(mc.world.getBlockState(result.getBlockPos()).getBlock() instanceof SlabBlock)
                     && slapTimer.hasReached(750)) {
 
-                // Убираем установку позы (Pose.STANDING) – не критично
                 slapTimer.reset();
                 placed = false;
             } else if ((mc.player.isOnGround() && !mc.options.jumpKey.isPressed())) {
