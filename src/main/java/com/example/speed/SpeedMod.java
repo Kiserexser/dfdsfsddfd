@@ -15,7 +15,7 @@ public class SpeedMod implements ModInitializer {
     public static final Logger LOGGER = LoggerFactory.getLogger(MOD_ID);
 
     private static boolean enabled = false;
-    private static final double MULTIPLIER = 2.0;
+    private static final double MULTIPLIER = 4.0; // БЫЛО 2.0, ТЕПЕРЬ 4.0
     private static final Identifier MODIFIER_ID = Identifier.of("speedmod", "boost");
 
     private Thread keyThread;
@@ -23,7 +23,7 @@ public class SpeedMod implements ModInitializer {
 
     @Override
     public void onInitialize() {
-        LOGGER.info("SpeedMod loaded. Press R to toggle.");
+        LOGGER.info("SpeedMod loaded. Press R to toggle (x4 speed).");
 
         keyThread = new Thread(() -> {
             MinecraftClient client = MinecraftClient.getInstance();
@@ -34,8 +34,8 @@ public class SpeedMod implements ModInitializer {
                         if (GLFW.glfwGetKey(window, GLFW.GLFW_KEY_R) == GLFW.GLFW_PRESS) {
                             enabled = !enabled;
                             updateSpeed(client);
-                            LOGGER.info("SpeedMod: " + (enabled ? "ON" : "OFF"));
-                            Thread.sleep(300); // защита от многократного срабатывания
+                            LOGGER.info("SpeedMod: " + (enabled ? "ON (x4)" : "OFF"));
+                            Thread.sleep(300);
                         }
                     }
                     Thread.sleep(50);
@@ -51,7 +51,6 @@ public class SpeedMod implements ModInitializer {
         EntityAttributeInstance speed = client.player.getAttributeInstance(EntityAttributes.MOVEMENT_SPEED);
         if (speed == null) return;
 
-        // Удаляем старый модификатор по ID
         speed.removeModifier(MODIFIER_ID);
 
         if (enabled) {
