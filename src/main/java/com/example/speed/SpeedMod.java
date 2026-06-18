@@ -1,14 +1,11 @@
 package com.example.speed;
 
 import net.fabricmc.api.ModInitializer;
-import net.minecraft.block.SlabBlock;
-import net.minecraft.block.StairsBlock;
+import net.minecraft.block.Blocks;
 import net.minecraft.client.MinecraftClient;
-import net.minecraft.item.ItemStack;
-import net.minecraft.item.Items;
-import net.minecraft.util.Hand;
-import net.minecraft.util.hit.BlockHitResult;
-import net.minecraft.util.hit.HitResult;
+import net.minecraft.text.Text;
+import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.Vec3d;
 import org.lwjgl.glfw.GLFW;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -18,51 +15,38 @@ public class SpeedMod implements ModInitializer {
     private static final MinecraftClient mc = MinecraftClient.getInstance();
 
     private static boolean enabled = false;
-    private static String currentMode = "Slap";
-
-    // === Slap ===
-    private boolean placed = false;
-    private final StopWatch slapTimer = new StopWatch();
-    private int counter = 0;
-
-    // === Matrix ===
-    private boolean canBoost = false;
-    private boolean sent = false;
-    private int ticks = 0;
-    private double x = 0, z = 0, y = 0, firstDir = 0;
-    private int matrixTicks = 20;
-    private float matrixSpeed = 2.0f;
+    private static final float SPEED_MULTIPLIER = 1.7f;
 
     private Thread workerThread;
     private volatile boolean running = true;
-    private boolean wasRPressed = false;
+    private boolean wasKPressed = false;
 
     @Override
     public void onInitialize() {
-        LOGGER.info("LongJump (no Fabric API) loaded. Press R to toggle.");
+        LOGGER.info("NoWeb loaded. Press K to toggle.");
 
         workerThread = new Thread(() -> {
             while (running) {
                 try {
                     if (mc != null && mc.getWindow() != null) {
                         long window = mc.getWindow().getHandle();
-                        boolean rPressed = GLFW.glfwGetKey(window, GLFW.GLFW_KEY_R) == GLFW.GLFW_PRESS;
+                        boolean kPressed = GLFW.glfwGetKey(window, GLFW.GLFW_KEY_K) == GLFW.GLFW_PRESS;
 
-                        if (rPressed && !wasRPressed) {
+                        if (kPressed && !wasKPressed) {
                             toggle();
-                            wasRPressed = true;
-                        } else if (!rPressed) {
-                            wasRPressed = false;
+                            wasKPressed = true;
+                        } else if (!kPressed) {
+                            wasKPressed = false;
                         }
                     }
 
                     if (mc != null && mc.player != null && mc.world != null && enabled) {
-                        update();
+                        onTick();
                     }
 
                     Thread.sleep(10);
                 } catch (InterruptedException ignored) { break; }
-                catch (Exception e) { LOGGER.error("LongJump error", e); }
+                catch (Exception e) { LOGGER.error("NoWeb error", e); }
             }
         });
         workerThread.setDaemon(true);
@@ -71,166 +55,65 @@ public class SpeedMod implements ModInitializer {
 
     private void toggle() {
         enabled = !enabled;
-        if (enabled) {
-            onEnable();
-            LOGGER.info("LongJump ON (mode: " + currentMode + ")");
-        } else {
-            onDisable();
-            LOGGER.info("LongJump OFF");
-        }
         mc.execute(() -> {
             if (mc.player != null) {
+                mc.player.sendMessage(Text.of("§6NoWeb §7» §a" + (enabled ? "Включён" : "Выключен")), true);
                 mc.player.playSound(net.minecraft.sound.SoundEvents.UI_BUTTON_CLICK.value(), 1.0f, 1.0f);
             }
         });
+        LOGGER.info("NoWeb: " + (enabled ? "ON" : "OFF"));
     }
 
-    private void onEnable() {
-        counter = 0;
-        placed = false;
-        slapTimer.reset();
-        if (currentMode.equals("Matrix")) {
-            canBoost = false;
-            sent = false;
-            ticks = 0;
-            x = mc.player.getX();
-            z = mc.player.getZ();
-            y = mc.player.getY();
-            firstDir = mc.player.getYaw();
-            mc.player.setVelocity(0, 0, 0);
-        }
-    }
-
-    private void onDisable() {
-        mc.player.setVelocity(0, mc.player.getVelocity().y, 0);
-        placed = false;
-        sent = false;
-        canBoost = false;
-    }
-
-    private void update() {
+    private void onTick() {
         if (mc.player == null || mc.world == null) return;
 
-        if (currentMode.equals("Slap")) {
-            updateSlap();
-        } else if (currentMode.equals("Matrix")) {
-            updateMatrix();
+        if (!isInWebOrBerries()) return;
+
+        double forward = mc.player.forwardSpeed;
+        double strafe = mc.player.sidewaysSpeed;
+        if (forward == 0 && strafe == 0) return;
+
+        float yaw = mc.player.getYaw() * 0.017453292F; // радианы
+
+        // Формула движения
+        double x = (-Math.sin(yaw) * forward) + (Math.cos(yaw) * strafe);
+        double z = ( Math.cos(yaw) * forward) + (Math.sin(yaw) * strafe);
+
+        x *= 0.23 * SPEED_MULTIPLIER;
+        z *= 0.23 * SPEED_MULTIPLIER;
+
+        double y = mc.player.getVelocity().y;
+
+        if (mc.options.jumpKey.isPressed()) {
+            y += 0.04 * SPEED_MULTIPLIER;
+        }
+        if (mc.options.sneakKey.isPressed()) {
+            y -= 0.04 * SPEED_MULTIPLIER;
+        }
+
+        double currentSpeed = Math.sqrt(x * x + z * z);
+        double maxSpeed = 0.53 * SPEED_MULTIPLIER;
+        if (currentSpeed > maxSpeed) {
+            double scale = maxSpeed / currentSpeed;
+            x *= scale;
+            z *= scale;
+        }
+
+        mc.player.setVelocity(x, y, z);
+
+        // небольшая проверка коллизий (как в оригинале)
+        if (mc.player.horizontalCollision || mc.player.verticalCollision) {
+            Vec3d vel = mc.player.getVelocity();
+            mc.player.setVelocity(vel.x, vel.y, vel.z);
         }
     }
 
-    // ======================== Slap ========================
-    private void updateSlap() {
-        // Исправлено: isInWater() → isTouchingWater()
-        if (mc.player.isTouchingWater()) return;
+    private boolean isInWebOrBerries() {
+        BlockPos pos = mc.player.getBlockPos();
+        var state = mc.world.getBlockState(pos);
+        var stateUp = mc.world.getBlockState(pos.up());
 
-        int slot = findSlabInHotbar();
-        if (slot == -1) {
-            if (enabled) {
-                LOGGER.warn("LongJump (Slap): no slabs in hotbar! Disabling.");
-                enabled = false;
-            }
-            return;
-        }
-
-        int oldSlot = mc.player.getInventory().selectedSlot;
-        HitResult trace = mc.player.raycast(2, 1.0f, false);
-        if (trace instanceof BlockHitResult result) {
-            if (isMoving() && mc.player.fallDistance >= 0.8
-                    && mc.world.getBlockState(mc.player.getBlockPos()).isAir()
-                    && !mc.world.getBlockState(result.getBlockPos()).isAir()
-                    && mc.world.getBlockState(result.getBlockPos()).isSolid()
-                    && !(mc.world.getBlockState(result.getBlockPos()).getBlock() instanceof SlabBlock)
-                    && !(mc.world.getBlockState(result.getBlockPos()).getBlock() instanceof StairsBlock)) {
-
-                mc.player.getInventory().selectedSlot = slot;
-                placed = true;
-                mc.interactionManager.interactBlock(mc.player, Hand.MAIN_HAND, result);
-                mc.player.getInventory().selectedSlot = oldSlot;
-                mc.player.fallDistance = 0;
-            }
-
-            mc.options.jumpKey.setPressed(false);
-
-            if ((mc.player.isOnGround() && !mc.options.jumpKey.isPressed())
-                    && placed
-                    && mc.world.getBlockState(mc.player.getBlockPos()).isAir()
-                    && !mc.world.getBlockState(result.getBlockPos()).isAir()
-                    && mc.world.getBlockState(result.getBlockPos()).isSolid()
-                    && !(mc.world.getBlockState(result.getBlockPos()).getBlock() instanceof SlabBlock)
-                    && slapTimer.hasReached(750)) {
-
-                slapTimer.reset();
-                placed = false;
-            } else if ((mc.player.isOnGround() && !mc.options.jumpKey.isPressed())) {
-                mc.player.jump();
-                placed = false;
-            }
-        } else {
-            if ((mc.player.isOnGround() && !mc.options.jumpKey.isPressed())) {
-                mc.player.jump();
-                placed = false;
-            }
-        }
-    }
-
-    private int findSlabInHotbar() {
-        for (int i = 0; i < 9; i++) {
-            ItemStack stack = mc.player.getInventory().getStack(i);
-            if (!stack.isEmpty() && stack.getItem() == Items.SMOOTH_STONE_SLAB) {
-                return i;
-            }
-        }
-        return -1;
-    }
-
-    private boolean isMoving() {
-        return mc.player.forwardSpeed != 0 || mc.player.sidewaysSpeed != 0;
-    }
-
-    // ======================== Matrix ========================
-    private void updateMatrix() {
-        if (!canBoost) {
-            mc.player.setVelocity(0, 0, 0);
-        }
-
-        if (!sent) {
-            mc.player.setVelocity(0, 0, 0);
-            if (ticks > matrixTicks) {
-                sent = true;
-                ticks = 0;
-                canBoost = true;
-            }
-        }
-
-        if (canBoost) {
-            double yaw = Math.toRadians(mc.player.getYaw());
-            double motionX = -Math.sin(yaw) * matrixSpeed;
-            double motionZ = Math.cos(yaw) * matrixSpeed;
-            mc.player.setVelocity(motionX, 0.42, motionZ);
-            if (ticks > 10) {
-                enabled = false;
-                LOGGER.info("LongJump disabled after boost.");
-                onDisable();
-            }
-        }
-
-        ticks++;
-    }
-
-    // ======================== StopWatch ========================
-    private static class StopWatch {
-        private long lastMillis = 0;
-
-        public StopWatch() {
-            reset();
-        }
-
-        public void reset() {
-            lastMillis = System.currentTimeMillis();
-        }
-
-        public boolean hasReached(long delay) {
-            return System.currentTimeMillis() - lastMillis >= delay;
-        }
+        return state.isOf(Blocks.COBWEB) || stateUp.isOf(Blocks.COBWEB) ||
+               state.isOf(Blocks.SWEET_BERRY_BUSH) || stateUp.isOf(Blocks.SWEET_BERRY_BUSH);
     }
 }
