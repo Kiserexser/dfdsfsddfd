@@ -5,7 +5,6 @@ import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.gui.widget.ButtonWidget;
-import net.minecraft.client.gui.widget.CheckboxWidget;
 import net.minecraft.client.gui.widget.SliderWidget;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.sound.SoundEvents;
@@ -24,7 +23,7 @@ import java.util.Random;
 public class SpeedMod implements ModInitializer {
     public static final Logger LOGGER = LoggerFactory.getLogger("speedmod");
 
-    // === Настройки (глобальные, изменяемые через GUI) ===
+    // === Настройки ===
     public static double RANGE = 4.5;
     public static double MIN_DELAY = 0.680;
     public static double MAX_DELAY = 0.700;
@@ -35,21 +34,17 @@ public class SpeedMod implements ModInitializer {
     public static long SHIFT_DURATION_MS = 3000;
     public static long RETURN_DURATION_MS = 2000;
     public static float JITTER_RANGE = 0.15f;
-    public static boolean ENABLED = false; // состояние On/Off
+    public static boolean ENABLED = false;
 
     private static final Random random = new Random();
     private long lastAttackTime = 0;
 
     private Thread workerThread;
     private volatile boolean running = true;
-
-    private float targetYaw = 0;
-    private float targetPitch = 0;
+    private float targetYaw = 0, targetPitch = 0;
     private long shiftCycleStart = System.currentTimeMillis();
     private boolean isShiftPhase = true;
     private LivingEntity lockedTarget = null;
-
-    // GUI будет открываться по правому Shift
     private boolean wasRightShiftPressed = false;
 
     @Override
@@ -63,7 +58,6 @@ public class SpeedMod implements ModInitializer {
                     if (client != null && client.getWindow() != null) {
                         long window = client.getWindow().getHandle();
 
-                        // === Открытие GUI по правому Shift ===
                         boolean rightShiftPressed = GLFW.glfwGetKey(window, GLFW.GLFW_KEY_RIGHT_SHIFT) == GLFW.GLFW_PRESS;
                         if (rightShiftPressed && !wasRightShiftPressed) {
                             client.execute(() -> client.setScreen(new SettingsGUI()));
@@ -89,13 +83,11 @@ public class SpeedMod implements ModInitializer {
                         shiftCycleStart = now;
                     }
 
-                    // === Логика цели ===
+                    // === Поиск цели ===
                     LivingEntity target = null;
                     if (lockedTarget != null && lockedTarget.isAlive() && !lockedTarget.isDead()) {
                         double dist = client.player.distanceTo(lockedTarget);
-                        if (dist <= RANGE) {
-                            target = lockedTarget;
-                        }
+                        if (dist <= RANGE) target = lockedTarget;
                     }
 
                     if (target == null) {
@@ -131,14 +123,12 @@ public class SpeedMod implements ModInitializer {
                     float jitterPitch = (random.nextFloat() - 0.5f) * JITTER_RANGE * 2;
 
                     float shift = 0f;
-                    if (ENABLE_SHIFT && isShiftPhase) {
-                        shift = SHIFT_DEGREES;
-                    }
+                    if (ENABLE_SHIFT && isShiftPhase) shift = SHIFT_DEGREES;
 
                     targetYaw = yaw + jitterYaw;
                     targetPitch = pitch + jitterPitch + shift;
 
-                    // === Плавная ротация и атака ===
+                    // === Применение и атака ===
                     final LivingEntity finalTarget = target;
                     final float finalYaw = targetYaw;
                     final float finalPitch = targetPitch;
@@ -204,18 +194,17 @@ public class SpeedMod implements ModInitializer {
     // =================== GUI (нежный стиль сакура) ===================
     private static class SettingsGUI extends Screen {
         private static final int WIDTH = 230;
-        private static final int HEIGHT = 280;
+        private static final int HEIGHT = 300;
         private int x, y;
 
-        // Виджеты
         private ButtonWidget toggleButton;
         private SliderWidget rangeSlider;
         private SliderWidget minDelaySlider;
         private SliderWidget maxDelaySlider;
         private SliderWidget jitterSlider;
         private SliderWidget shiftSlider;
-        private CheckboxWidget sprintCheckbox;
-        private CheckboxWidget shiftCheckbox;
+        private ButtonWidget sprintToggle;
+        private ButtonWidget shiftToggle;
 
         protected SettingsGUI() {
             super(Text.literal("SpeedMod Settings"));
@@ -224,27 +213,28 @@ public class SpeedMod implements ModInitializer {
         @Override
         protected void init() {
             super.init();
-            // Центрируем окно
             this.x = (this.width - WIDTH) / 2;
             this.y = (this.height - HEIGHT) / 2;
 
-            // Кнопка On/Off
+            // === Кнопка On/Off ===
             toggleButton = ButtonWidget.builder(
                     Text.literal(ENABLED ? "§aON" : "§cOFF"),
-                    button -> {
+                    btn -> {
                         ENABLED = !ENABLED;
                         toggleButton.setMessage(Text.literal(ENABLED ? "§aON" : "§cOFF"));
-                        // звук
                         if (client != null && client.player != null) {
                             client.player.playSound(SoundEvents.UI_BUTTON_CLICK.value(), 1.0f, 1.0f);
                         }
                     }
-            ).dimensions(x + 10, y + 20, 60, 20).build();
+            ).dimensions(x + 10, y + 25, 60, 20).build();
             this.addDrawableChild(toggleButton);
 
-            // Заголовок "KillAura"
-            // Ползунок радиуса
-            rangeSlider = new SliderWidget(x + 10, y + 55, 200, 20, Text.literal("Радиус: " + RANGE), 1.0, 8.0, RANGE) {
+            // === Ползунок радиуса ===
+            rangeSlider = new SliderWidget(x + 10, y + 55, 200, 20, Text.literal("Радиус: " + RANGE), RANGE) {
+                {
+                    setMin(1.0);
+                    setMax(8.0);
+                }
                 @Override
                 protected void updateMessage() {
                     this.setMessage(Text.literal("Радиус: " + String.format("%.1f", value)));
@@ -256,8 +246,12 @@ public class SpeedMod implements ModInitializer {
             };
             this.addDrawableChild(rangeSlider);
 
-            // Мин. задержка
-            minDelaySlider = new SliderWidget(x + 10, y + 80, 200, 20, Text.literal("Мин. задержка: " + MIN_DELAY), 0.1, 1.0, MIN_DELAY) {
+            // === Мин. задержка ===
+            minDelaySlider = new SliderWidget(x + 10, y + 80, 200, 20, Text.literal("Мин. задержка: " + MIN_DELAY), MIN_DELAY) {
+                {
+                    setMin(0.1);
+                    setMax(1.0);
+                }
                 @Override
                 protected void updateMessage() {
                     this.setMessage(Text.literal("Мин. задержка: " + String.format("%.3f", value)));
@@ -270,8 +264,12 @@ public class SpeedMod implements ModInitializer {
             };
             this.addDrawableChild(minDelaySlider);
 
-            // Макс. задержка
-            maxDelaySlider = new SliderWidget(x + 10, y + 105, 200, 20, Text.literal("Макс. задержка: " + MAX_DELAY), 0.1, 1.0, MAX_DELAY) {
+            // === Макс. задержка ===
+            maxDelaySlider = new SliderWidget(x + 10, y + 105, 200, 20, Text.literal("Макс. задержка: " + MAX_DELAY), MAX_DELAY) {
+                {
+                    setMin(0.1);
+                    setMax(1.0);
+                }
                 @Override
                 protected void updateMessage() {
                     this.setMessage(Text.literal("Макс. задержка: " + String.format("%.3f", value)));
@@ -284,8 +282,12 @@ public class SpeedMod implements ModInitializer {
             };
             this.addDrawableChild(maxDelaySlider);
 
-            // Джиттер
-            jitterSlider = new SliderWidget(x + 10, y + 130, 200, 20, Text.literal("Джиттер: " + JITTER_RANGE), 0.0, 1.0, JITTER_RANGE) {
+            // === Джиттер ===
+            jitterSlider = new SliderWidget(x + 10, y + 130, 200, 20, Text.literal("Джиттер: " + JITTER_RANGE), JITTER_RANGE) {
+                {
+                    setMin(0.0);
+                    setMax(1.0);
+                }
                 @Override
                 protected void updateMessage() {
                     this.setMessage(Text.literal("Джиттер: " + String.format("%.2f", value)));
@@ -297,8 +299,12 @@ public class SpeedMod implements ModInitializer {
             };
             this.addDrawableChild(jitterSlider);
 
-            // Смещение (вниз/вверх)
-            shiftSlider = new SliderWidget(x + 10, y + 155, 200, 20, Text.literal("Смещение: " + SHIFT_DEGREES + "°"), 0.0, 1.0, SHIFT_DEGREES) {
+            // === Смещение ===
+            shiftSlider = new SliderWidget(x + 10, y + 155, 200, 20, Text.literal("Смещение: " + SHIFT_DEGREES + "°"), SHIFT_DEGREES) {
+                {
+                    setMin(0.0);
+                    setMax(1.0);
+                }
                 @Override
                 protected void updateMessage() {
                     this.setMessage(Text.literal("Смещение: " + String.format("%.2f", value) + "°"));
@@ -310,57 +316,52 @@ public class SpeedMod implements ModInitializer {
             };
             this.addDrawableChild(shiftSlider);
 
-            // Чекбокс "Сброс спринта"
-            sprintCheckbox = new CheckboxWidget(x + 10, y + 180, 20, 20, Text.literal("Сброс спринта"), SPRINT_RESET) {
-                @Override
-                public void onPress() {
-                    super.onPress();
-                    SPRINT_RESET = this.isChecked();
-                }
-            };
-            this.addDrawableChild(sprintCheckbox);
+            // === Кнопка-переключатель "Сброс спринта" ===
+            sprintToggle = ButtonWidget.builder(
+                    Text.literal(SPRINT_RESET ? "§aСброс спринта Вкл" : "§cСброс спринта Выкл"),
+                    btn -> {
+                        SPRINT_RESET = !SPRINT_RESET;
+                        sprintToggle.setMessage(Text.literal(SPRINT_RESET ? "§aСброс спринта Вкл" : "§cСброс спринта Выкл"));
+                    }
+            ).dimensions(x + 10, y + 180, 140, 20).build();
+            this.addDrawableChild(sprintToggle);
 
-            // Чекбокс "Смещение включено"
-            shiftCheckbox = new CheckboxWidget(x + 120, y + 180, 20, 20, Text.literal("Смещение вкл"), ENABLE_SHIFT) {
-                @Override
-                public void onPress() {
-                    super.onPress();
-                    ENABLE_SHIFT = this.isChecked();
-                }
-            };
-            this.addDrawableChild(shiftCheckbox);
+            // === Кнопка-переключатель "Смещение вкл" ===
+            shiftToggle = ButtonWidget.builder(
+                    Text.literal(ENABLE_SHIFT ? "§aСмещение Вкл" : "§cСмещение Выкл"),
+                    btn -> {
+                        ENABLE_SHIFT = !ENABLE_SHIFT;
+                        shiftToggle.setMessage(Text.literal(ENABLE_SHIFT ? "§aСмещение Вкл" : "§cСмещение Выкл"));
+                    }
+            ).dimensions(x + 10, y + 205, 140, 20).build();
+            this.addDrawableChild(shiftToggle);
 
-            // Кнопка "Закрыть"
+            // === Кнопка "Закрыть" ===
             ButtonWidget closeButton = ButtonWidget.builder(
                     Text.literal("Закрыть"),
-                    button -> this.close()
+                    btn -> this.close()
             ).dimensions(x + 80, y + HEIGHT - 30, 70, 20).build();
             this.addDrawableChild(closeButton);
         }
 
         @Override
         public void render(DrawContext context, int mouseX, int mouseY, float delta) {
-            // Рисуем фон с закруглёнными углами (имитация скругления через отступы и тень)
-            // Белый фон
-            int bgColor = 0xFFFFFF; // белый
-            int borderColor = 0xFFB6C1; // светло-розовый
-            int textColor = 0xFF69B4; // горячий розовый
+            // Белый фон с розовой рамкой
+            int bgColor = 0xFFFFFF;
+            int borderColor = 0xFFB6C1;
+            int textColor = 0xFF69B4;
 
-            // Рисуем основной прямоугольник
             context.fill(x, y, x + WIDTH, y + HEIGHT, bgColor);
-            // Рисуем рамку (только для стиля)
+            // Рамка
             context.fill(x, y, x + WIDTH, y + 1, borderColor);
             context.fill(x, y + HEIGHT - 1, x + WIDTH, y + HEIGHT, borderColor);
             context.fill(x, y, x + 1, y + HEIGHT, borderColor);
             context.fill(x + WIDTH - 1, y, x + WIDTH, y + HEIGHT, borderColor);
 
-            // Рисуем заголовок "Combat" и "KillAura"
+            // Заголовки
             context.drawCenteredTextWithShadow(textRenderer, Text.literal("§dCombat"), x + WIDTH/2, y + 5, textColor);
-            context.drawTextWithShadow(textRenderer, Text.literal("§dKillAura"), x + 15, y + 25, textColor);
+            context.drawTextWithShadow(textRenderer, Text.literal("§dKillAura"), x + 15, y + 28, textColor);
 
-            // Рисуем чекбоксы вручную? Нет, они сами рисуются.
-
-            // Рисуем остальные виджеты (они автоматически рендерятся)
             super.render(context, mouseX, mouseY, delta);
         }
 
@@ -371,14 +372,11 @@ public class SpeedMod implements ModInitializer {
 
         @Override
         public void close() {
-            if (client != null) {
-                client.setScreen(null);
-            }
+            if (client != null) client.setScreen(null);
         }
 
         @Override
         public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
-            // Закрыть по ESC
             if (keyCode == GLFW.GLFW_KEY_ESCAPE) {
                 this.close();
                 return true;
