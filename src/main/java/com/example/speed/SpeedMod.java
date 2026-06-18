@@ -21,34 +21,39 @@ public class SpeedMod implements ModInitializer {
     private static final Random random = new Random();
     private long lastAttackTime = 0;
 
-    // === Настройки (обновлены) ===
+    // === Настройки ===
     private static final double RANGE = 4.5;
-    private static final double MIN_DELAY = 0.690;   // 0.690 сек
-    private static final double MAX_DELAY = 0.750;   // 0.750 сек
+    private static final double MIN_DELAY = 0.690;
+    private static final double MAX_DELAY = 0.750;
     private static final boolean SPRINT_RESET = true;
     private static final float SMOOTH_SPEED = 0.15f;
 
-    // === Периодическое смещение (вниз/вверх) ===
+    // === Смещение для обхода ===
     private static final boolean ENABLE_SHIFT = true;
-    private static final float SHIFT_DEGREES = 0.5f;       // ~10 пикселей
-    private static final long SHIFT_DURATION_MS = 3000;    // 3 сек
-    private static final long RETURN_DURATION_MS = 2000;   // 2 сек
+    private static final float SHIFT_DEGREES = 0.5f;
+    private static final long SHIFT_DURATION_MS = 3000;
+    private static final long RETURN_DURATION_MS = 2000;
 
-    // === Джиттер для обхода Grimac / Matic ===
-    private static final float JITTER_RANGE = 0.15f;       // небольшое дрожание (±0.15°)
+    // === Джиттер ===
+    private static final float JITTER_RANGE = 0.15f;
 
     private Thread workerThread;
     private volatile boolean running = true;
 
+    // Целевые углы
     private float targetYaw = 0;
     private float targetPitch = 0;
 
+    // Фаза смещения
     private long shiftCycleStart = System.currentTimeMillis();
     private boolean isShiftPhase = true;
 
+    // === ЗАФИКСИРОВАННАЯ ЦЕЛЬ ===
+    private LivingEntity lockedTarget = null;
+
     @Override
     public void onInitialize() {
-        LOGGER.info("SpeedMod KillAura with anti-Grimac/Matic loaded. Press R to toggle.");
+        LOGGER.info("SpeedMod KillAura with LOCK TARGET loaded. Press R to toggle.");
 
         workerThread = new Thread(() -> {
             MinecraftClient client = MinecraftClient.getInstance();
@@ -59,6 +64,7 @@ public class SpeedMod implements ModInitializer {
                         long window = client.getWindow().getHandle();
                         if (GLFW.glfwGetKey(window, GLFW.GLFW_KEY_R) == GLFW.GLFW_PRESS) {
                             enabled = !enabled;
+                            if (!enabled) lockedTarget = null; // сброс цели при выключении
                             LOGGER.info("KillAura: " + (enabled ? "ON" : "OFF"));
                             Thread.sleep(300);
                         }
@@ -80,8 +86,22 @@ public class SpeedMod implements ModInitializer {
                         shiftCycleStart = now;
                     }
 
-                    // === Поиск цели ===
-                    LivingEntity target = getTarget(client);
+                    // === Логика выбора цели (с фиксацией) ===
+                    // Если есть зафиксированная цель – проверяем, жива ли и в радиусе
+                    LivingEntity target = null;
+                    if (lockedTarget != null && lockedTarget.isAlive() && !lockedTarget.isDead()) {
+                        double dist = client.player.distanceTo(lockedTarget);
+                        if (dist <= RANGE) {
+                            target = lockedTarget;
+                        }
+                    }
+
+                    // Если цели нет или она ушла – ищем новую ближайшую и фиксируем её
+                    if (target == null) {
+                        lockedTarget = getTarget(client);
+                        target = lockedTarget;
+                    }
+
                     if (target == null) {
                         Thread.sleep(50);
                         continue;
@@ -89,11 +109,13 @@ public class SpeedMod implements ModInitializer {
 
                     double dist = client.player.distanceTo(target);
                     if (dist > RANGE) {
+                        // цель ушла слишком далеко – сбрасываем
+                        lockedTarget = null;
                         Thread.sleep(50);
                         continue;
                     }
 
-                    // === Вычисление углов ===
+                    // === Вычисление углов на цель (с джиттером и смещением) ===
                     Vec3d eyePos = client.player.getEyePos();
                     Vec3d targetPos = target.getPos().add(0, target.getHeight() * 0.5, 0);
 
@@ -105,11 +127,11 @@ public class SpeedMod implements ModInitializer {
                     float yaw = (float) MathHelper.atan2(dz, dx) * (180F / (float) Math.PI) - 90F;
                     float pitch = (float) -MathHelper.atan2(dy, distance) * (180F / (float) Math.PI);
 
-                    // === Джиттер для обхода (случайное смещение) ===
+                    // Джиттер
                     float jitterYaw = (random.nextFloat() - 0.5f) * JITTER_RANGE * 2;
                     float jitterPitch = (random.nextFloat() - 0.5f) * JITTER_RANGE * 2;
 
-                    // === Смещение вниз/вверх (периодическое) ===
+                    // Смещение вниз/вверх (периодическое)
                     float shift = 0f;
                     if (ENABLE_SHIFT && isShiftPhase) {
                         shift = SHIFT_DEGREES;
@@ -125,7 +147,6 @@ public class SpeedMod implements ModInitializer {
                     client.execute(() -> {
                         if (client.player == null) return;
 
-                        // Интерполяция
                         float currentYaw = client.player.getYaw();
                         float currentPitch = client.player.getPitch();
 
@@ -135,18 +156,15 @@ public class SpeedMod implements ModInitializer {
                         client.player.setYaw(newYaw);
                         client.player.setPitch(newPitch);
 
-                        // Атака с задержкой
+                        // Атака
                         long now2 = System.currentTimeMillis();
                         double delay = MIN_DELAY + (MAX_DELAY - MIN_DELAY) * random.nextDouble();
                         long delayMs = (long) (delay * 1000);
 
                         if (now2 - lastAttackTime >= delayMs && target.isAlive()) {
-                            // Сброс спринта
                             if (SPRINT_RESET && client.player.isSprinting()) {
                                 client.player.setSprinting(false);
                             }
-
-                            // Реальный удар с отводкой
                             client.interactionManager.attackEntity(client.player, target);
                             client.player.swingHand(client.player.getActiveHand());
                             lastAttackTime = now2;
