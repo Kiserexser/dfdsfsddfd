@@ -15,7 +15,7 @@ public class SpeedMod implements ModInitializer {
     private static final MinecraftClient mc = MinecraftClient.getInstance();
 
     private static boolean enabled = false;
-    private static final float SPEED_MULTIPLIER = 2.55f; // было 1.7, теперь в 1.5 раза больше
+    private static final float SPEED_MULTIPLIER = 2.55f;
 
     private Thread workerThread;
     private volatile boolean running = true;
@@ -33,7 +33,8 @@ public class SpeedMod implements ModInitializer {
                         boolean kPressed = GLFW.glfwGetKey(window, GLFW.GLFW_KEY_K) == GLFW.GLFW_PRESS;
 
                         if (kPressed && !wasKPressed) {
-                            toggle();
+                            // Переключаем в основном потоке
+                            mc.execute(() -> toggle());
                             wasKPressed = true;
                         } else if (!kPressed) {
                             wasKPressed = false;
@@ -41,7 +42,11 @@ public class SpeedMod implements ModInitializer {
                     }
 
                     if (mc != null && mc.player != null && mc.world != null && enabled) {
-                        onTick();
+                        mc.execute(() -> {
+                            if (mc.player != null && mc.world != null) {
+                                applySpeed();
+                            }
+                        });
                     }
 
                     Thread.sleep(10);
@@ -55,16 +60,19 @@ public class SpeedMod implements ModInitializer {
 
     private void toggle() {
         enabled = !enabled;
-        mc.execute(() -> {
-            if (mc.player != null) {
-                mc.player.sendMessage(Text.of("§6NoWeb §7» §a" + (enabled ? "Включён" : "Выключен")), true);
-                mc.player.playSound(net.minecraft.sound.SoundEvents.UI_BUTTON_CLICK.value(), 1.0f, 1.0f);
-            }
-        });
+        // Отправляем сообщение через чат-худ (гарантированно работает)
+        if (mc.inGameHud != null) {
+            mc.inGameHud.getChatHud().addMessage(Text.of("§6NoWeb §7» §a" + (enabled ? "Включён" : "Выключен")));
+        }
+        // Дублируем в лог
         LOGGER.info("NoWeb: " + (enabled ? "ON" : "OFF"));
+        // Звук
+        if (mc.player != null) {
+            mc.player.playSound(net.minecraft.sound.SoundEvents.UI_BUTTON_CLICK.value(), 1.0f, 1.0f);
+        }
     }
 
-    private void onTick() {
+    private void applySpeed() {
         if (mc.player == null || mc.world == null) return;
 
         if (!isInWebOrBerries()) return;
@@ -73,7 +81,7 @@ public class SpeedMod implements ModInitializer {
         double strafe = mc.player.sidewaysSpeed;
         if (forward == 0 && strafe == 0) return;
 
-        float yaw = mc.player.getYaw() * 0.017453292F; // радианы
+        float yaw = mc.player.getYaw() * 0.017453292F;
 
         double x = (-Math.sin(yaw) * forward) + (Math.cos(yaw) * strafe);
         double z = ( Math.cos(yaw) * forward) + (Math.sin(yaw) * strafe);
