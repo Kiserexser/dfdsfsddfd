@@ -15,7 +15,7 @@ public class SpeedMod implements ModInitializer {
     private static final MinecraftClient mc = MinecraftClient.getInstance();
 
     private static boolean enabled = false;
-    private static final float SPEED_MULTIPLIER = 1.7f;
+    private static final float SPEED_MULTIPLIER = 2.55f; // было 1.7, теперь в 1.5 раза больше
 
     private Thread workerThread;
     private volatile boolean running = true;
@@ -75,7 +75,6 @@ public class SpeedMod implements ModInitializer {
 
         float yaw = mc.player.getYaw() * 0.017453292F; // радианы
 
-        // Формула движения
         double x = (-Math.sin(yaw) * forward) + (Math.cos(yaw) * strafe);
         double z = ( Math.cos(yaw) * forward) + (Math.sin(yaw) * strafe);
 
@@ -101,7 +100,6 @@ public class SpeedMod implements ModInitializer {
 
         mc.player.setVelocity(x, y, z);
 
-        // небольшая проверка коллизий (как в оригинале)
         if (mc.player.horizontalCollision || mc.player.verticalCollision) {
             Vec3d vel = mc.player.getVelocity();
             mc.player.setVelocity(vel.x, vel.y, vel.z);
