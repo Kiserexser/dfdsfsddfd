@@ -21,37 +21,46 @@ public class SpeedMod implements ModInitializer {
     private static final Random random = new Random();
     private long lastAttackTime = 0;
 
-    // === Настройки (можно менять прямо в коде) ===
+    // === Настройки (обновлены) ===
     private static final double RANGE = 4.5;
-    private static final double MIN_DELAY = 0.680;
-    private static final double MAX_DELAY = 0.740;
-    private static final double JITTER_H = 3.0;    // градусы
-    private static final double JITTER_V = 5.0;
+    private static final double MIN_DELAY = 0.690;   // 0.690 сек
+    private static final double MAX_DELAY = 0.750;   // 0.750 сек
     private static final boolean SPRINT_RESET = true;
-    private static final float SMOOTH_SPEED = 0.15f; // скорость плавного поворота (0..1)
+    private static final float SMOOTH_SPEED = 0.15f;
+
+    // === Периодическое смещение (вниз/вверх) ===
+    private static final boolean ENABLE_SHIFT = true;
+    private static final float SHIFT_DEGREES = 0.5f;       // ~10 пикселей
+    private static final long SHIFT_DURATION_MS = 3000;    // 3 сек
+    private static final long RETURN_DURATION_MS = 2000;   // 2 сек
+
+    // === Джиттер для обхода Grimac / Matic ===
+    private static final float JITTER_RANGE = 0.15f;       // небольшое дрожание (±0.15°)
 
     private Thread workerThread;
     private volatile boolean running = true;
 
-    // текущие целевые углы (для плавности)
     private float targetYaw = 0;
     private float targetPitch = 0;
 
+    private long shiftCycleStart = System.currentTimeMillis();
+    private boolean isShiftPhase = true;
+
     @Override
     public void onInitialize() {
-        LOGGER.info("SpeedMod KillAura with smooth rotation and swing loaded. Press R to toggle.");
+        LOGGER.info("SpeedMod KillAura with anti-Grimac/Matic loaded. Press R to toggle.");
 
         workerThread = new Thread(() -> {
             MinecraftClient client = MinecraftClient.getInstance();
             while (running) {
                 try {
-                    // ===== Обработка клавиши R =====
+                    // === Обработка клавиши R ===
                     if (client != null && client.getWindow() != null) {
                         long window = client.getWindow().getHandle();
                         if (GLFW.glfwGetKey(window, GLFW.GLFW_KEY_R) == GLFW.GLFW_PRESS) {
                             enabled = !enabled;
                             LOGGER.info("KillAura: " + (enabled ? "ON" : "OFF"));
-                            Thread.sleep(300); // дебаунс
+                            Thread.sleep(300);
                         }
                     }
 
@@ -60,7 +69,18 @@ public class SpeedMod implements ModInitializer {
                         continue;
                     }
 
-                    // ===== Поиск цели =====
+                    // === Обновление фазы смещения ===
+                    long now = System.currentTimeMillis();
+                    long elapsed = now - shiftCycleStart;
+                    if (isShiftPhase && elapsed >= SHIFT_DURATION_MS) {
+                        isShiftPhase = false;
+                        shiftCycleStart = now;
+                    } else if (!isShiftPhase && elapsed >= RETURN_DURATION_MS) {
+                        isShiftPhase = true;
+                        shiftCycleStart = now;
+                    }
+
+                    // === Поиск цели ===
                     LivingEntity target = getTarget(client);
                     if (target == null) {
                         Thread.sleep(50);
@@ -73,14 +93,9 @@ public class SpeedMod implements ModInitializer {
                         continue;
                     }
 
-                    // ===== Вычисляем углы для наведения (с джиттером) =====
+                    // === Вычисление углов ===
                     Vec3d eyePos = client.player.getEyePos();
-                    Vec3d targetPos = target.getPos().add(0, target.getHeight() * 0.5, 0); // центр тела
-
-                    // Добавляем случайный джиттер (только для цели, чтобы прицел "плавал")
-                    double jitterX = (random.nextDouble() - 0.5) * JITTER_H * 0.02;
-                    double jitterY = (random.nextDouble() - 0.5) * JITTER_V * 0.02;
-                    targetPos = targetPos.add(jitterX, jitterY, jitterX); // небольшое смещение
+                    Vec3d targetPos = target.getPos().add(0, target.getHeight() * 0.5, 0);
 
                     double dx = targetPos.x - eyePos.x;
                     double dy = targetPos.y - eyePos.y;
@@ -90,19 +105,27 @@ public class SpeedMod implements ModInitializer {
                     float yaw = (float) MathHelper.atan2(dz, dx) * (180F / (float) Math.PI) - 90F;
                     float pitch = (float) -MathHelper.atan2(dy, distance) * (180F / (float) Math.PI);
 
-                    // Добавляем джиттер уже к готовым углам (вторичный)
-                    float finalYaw = yaw + (float) (JITTER_H * (random.nextDouble() - 0.5) * 2);
-                    float finalPitch = pitch + (float) (JITTER_V * (random.nextDouble() - 0.5) * 2);
+                    // === Джиттер для обхода (случайное смещение) ===
+                    float jitterYaw = (random.nextFloat() - 0.5f) * JITTER_RANGE * 2;
+                    float jitterPitch = (random.nextFloat() - 0.5f) * JITTER_RANGE * 2;
 
-                    // Запоминаем целевые углы для плавного поворота
+                    // === Смещение вниз/вверх (периодическое) ===
+                    float shift = 0f;
+                    if (ENABLE_SHIFT && isShiftPhase) {
+                        shift = SHIFT_DEGREES;
+                    }
+
+                    float finalYaw = yaw + jitterYaw;
+                    float finalPitch = pitch + jitterPitch + shift;
+
                     targetYaw = finalYaw;
                     targetPitch = finalPitch;
 
-                    // ===== Плавная ротация и атака в основном потоке =====
+                    // === Плавная ротация и атака ===
                     client.execute(() -> {
                         if (client.player == null) return;
 
-                        // Интерполяция к целевым углам
+                        // Интерполяция
                         float currentYaw = client.player.getYaw();
                         float currentPitch = client.player.getPitch();
 
@@ -112,30 +135,29 @@ public class SpeedMod implements ModInitializer {
                         client.player.setYaw(newYaw);
                         client.player.setPitch(newPitch);
 
-                        // ===== Атака с задержкой =====
-                        long now = System.currentTimeMillis();
+                        // Атака с задержкой
+                        long now2 = System.currentTimeMillis();
                         double delay = MIN_DELAY + (MAX_DELAY - MIN_DELAY) * random.nextDouble();
                         long delayMs = (long) (delay * 1000);
 
-                        if (now - lastAttackTime >= delayMs && target.isAlive()) {
+                        if (now2 - lastAttackTime >= delayMs && target.isAlive()) {
                             // Сброс спринта
                             if (SPRINT_RESET && client.player.isSprinting()) {
                                 client.player.setSprinting(false);
                             }
 
-                            // Атака с отводкой (swing) – теперь удары видны всем!
+                            // Реальный удар с отводкой
                             client.interactionManager.attackEntity(client.player, target);
-                            client.player.swingHand(client.player.getActiveHand()); // <-- анимация руки
-
-                            lastAttackTime = now;
+                            client.player.swingHand(client.player.getActiveHand());
+                            lastAttackTime = now2;
                         }
                     });
 
-                    Thread.sleep(10); // проверка каждые 10 мс
+                    Thread.sleep(10);
                 } catch (InterruptedException ignored) {
                     break;
                 } catch (Exception e) {
-                    LOGGER.error("KillAura thread error", e);
+                    LOGGER.error("KillAura error", e);
                 }
             }
         });
@@ -143,7 +165,6 @@ public class SpeedMod implements ModInitializer {
         workerThread.start();
     }
 
-    // === Вспомогательные методы ===
     private LivingEntity getTarget(MinecraftClient client) {
         Box box = client.player.getBoundingBox().expand(RANGE);
         List<LivingEntity> entities = client.world.getEntitiesByClass(LivingEntity.class, box,
@@ -152,7 +173,6 @@ public class SpeedMod implements ModInitializer {
         return entities.isEmpty() ? null : entities.get(0);
     }
 
-    // Плавная интерполяция углов с учётом перехода через -180/180
     private float lerpAngle(float from, float to, float speed) {
         float diff = to - from;
         diff = (diff % 360 + 540) % 360 - 180;
