@@ -1,15 +1,17 @@
 package com.example.speed;
 
 import net.fabricmc.api.ModInitializer;
+import net.minecraft.block.SlabBlock;
+import net.minecraft.block.StairsBlock;
 import net.minecraft.client.MinecraftClient;
-import net.minecraft.entity.EquipmentSlot;
+import net.minecraft.entity.Pose;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
-import net.minecraft.network.packet.c2s.play.ClientCommandC2SPacket;
-import net.minecraft.network.packet.c2s.play.PlayerInteractItemC2SPacket;
 import net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket;
-import net.minecraft.sound.SoundEvents;
 import net.minecraft.util.Hand;
+import net.minecraft.util.hit.BlockHitResult;
+import net.minecraft.util.hit.HitResult;
+import net.minecraft.util.math.Vec3d;
 import org.lwjgl.glfw.GLFW;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -20,176 +22,226 @@ public class SpeedMod implements ModInitializer {
     public static final Logger LOGGER = LoggerFactory.getLogger("speedmod");
     private static final MinecraftClient mc = MinecraftClient.getInstance();
 
-    private static boolean elytraFlyEnabled = false;
-    private static String currentMode = "Grim-2.3.69";
-    private static int elytraPacketCounter = 0;
+    private static boolean enabled = false;
+    private static String currentMode = "Slap"; // "Slap" или "Matrix"
 
-    private boolean wasG = false, wasH = false;
+    // === Slap ===
+    private boolean placed = false;
+    private final StopWatch slapTimer = new StopWatch();
+    private int counter = 0;
+
+    // === Matrix ===
+    private boolean canBoost = false;
+    private boolean sent = false;
+    private int ticks = 0;
+    private double x = 0, z = 0, y = 0, firstDir = 0;
+    private int matrixTicks = 20;
+    private float matrixSpeed = 2.0f;
 
     private Thread workerThread;
     private volatile boolean running = true;
+    private boolean wasRPressed = false;
 
     @Override
     public void onInitialize() {
-        LOGGER.info("ElytraFly loaded. G = Grim-2.3.69, H = Grim-2.3.71");
+        LOGGER.info("LongJump (no Fabric API) loaded. Press R to toggle.");
 
         workerThread = new Thread(() -> {
             while (running) {
                 try {
                     if (mc != null && mc.getWindow() != null) {
                         long window = mc.getWindow().getHandle();
+                        boolean rPressed = GLFW.glfwGetKey(window, GLFW.GLFW_KEY_R) == GLFW.GLFW_PRESS;
 
-                        boolean gPressed = GLFW.glfwGetKey(window, GLFW.GLFW_KEY_G) == GLFW.GLFW_PRESS;
-                        boolean hPressed = GLFW.glfwGetKey(window, GLFW.GLFW_KEY_H) == GLFW.GLFW_PRESS;
-
-                        if (gPressed && !wasG) {
-                            toggleElytraFly("Grim-2.3.69");
-                            wasG = true;
-                        } else if (!gPressed) wasG = false;
-
-                        if (hPressed && !wasH) {
-                            toggleElytraFly("Grim-2.3.71");
-                            wasH = true;
-                        } else if (!hPressed) wasH = false;
+                        if (rPressed && !wasRPressed) {
+                            toggle();
+                            wasRPressed = true;
+                        } else if (!rPressed) {
+                            wasRPressed = false;
+                        }
                     }
 
-                    if (mc != null && mc.player != null && mc.world != null && elytraFlyEnabled) {
-                        updateElytraFly();
+                    if (mc != null && mc.player != null && mc.world != null && enabled) {
+                        update();
                     }
 
                     Thread.sleep(10);
                 } catch (InterruptedException ignored) { break; }
-                catch (Exception e) { LOGGER.error("ElytraFly error", e); }
+                catch (Exception e) { LOGGER.error("LongJump error", e); }
             }
         });
         workerThread.setDaemon(true);
         workerThread.start();
     }
 
-    private static void toggleElytraFly(String mode) {
-        if (!elytraFlyEnabled || !currentMode.equals(mode)) {
-            elytraFlyEnabled = true;
-            currentMode = mode;
-            elytraPacketCounter = 0;
-            LOGGER.info("ElytraFly ON, mode: " + mode);
-            mc.execute(() -> {
-                if (mc.player != null) mc.player.playSound(SoundEvents.UI_BUTTON_CLICK.value(), 1.0f, 1.0f);
-            });
+    private void toggle() {
+        enabled = !enabled;
+        if (enabled) {
+            onEnable();
+            LOGGER.info("LongJump ON (mode: " + currentMode + ")");
         } else {
-            elytraFlyEnabled = false;
-            elytraPacketCounter = 0;
-            LOGGER.info("ElytraFly OFF");
-            mc.execute(() -> {
-                if (mc.player != null) mc.player.playSound(SoundEvents.UI_BUTTON_CLICK.value(), 1.0f, 1.0f);
-            });
+            onDisable();
+            LOGGER.info("LongJump OFF");
+        }
+        // звук (опционально)
+        mc.execute(() -> {
+            if (mc.player != null) {
+                mc.player.playSound(net.minecraft.sound.SoundEvents.UI_BUTTON_CLICK.value(), 1.0f, 1.0f);
+            }
+        });
+    }
+
+    private void onEnable() {
+        counter = 0;
+        placed = false;
+        slapTimer.reset();
+        if (currentMode.equals("Matrix")) {
+            canBoost = false;
+            sent = false;
+            ticks = 0;
+            x = mc.player.getX();
+            z = mc.player.getZ();
+            y = mc.player.getY();
+            firstDir = mc.player.getYaw();
+            mc.player.setVelocity(0, 0, 0);
         }
     }
 
-    private static void updateElytraFly() {
-        if (mc.player == null) return;
+    private void onDisable() {
+        mc.player.setVelocity(0, mc.player.getVelocity().y, 0);
+        mc.player.setPose(Pose.STANDING);
+        placed = false;
+        sent = false;
+        canBoost = false;
+    }
 
-        int elytraSlot = -1, fireworkSlot = -1;
-        for (int i = 0; i < 36; i++) {
-            ItemStack stack = mc.player.getInventory().getStack(i);
-            if (stack.getItem() == Items.ELYTRA) elytraSlot = i;
-            if (stack.getItem() == Items.FIREWORK_ROCKET) fireworkSlot = i;
+    private void update() {
+        if (mc.player == null || mc.world == null) return;
+
+        if (currentMode.equals("Slap")) {
+            updateSlap();
+        } else if (currentMode.equals("Matrix")) {
+            updateMatrix();
         }
+    }
 
-        if (elytraSlot == -1 || fireworkSlot == -1) {
-            if (elytraFlyEnabled) {
-                LOGGER.warn("ElytraFly: missing elytra or fireworks! Disabling.");
-                elytraFlyEnabled = false;
+    // ======================== Slap ========================
+    private void updateSlap() {
+        if (mc.player.isInWater()) return;
+
+        int slot = findSlabInHotbar();
+        if (slot == -1) {
+            if (enabled) {
+                LOGGER.warn("LongJump (Slap): no slabs in hotbar! Disabling.");
+                enabled = false;
             }
             return;
         }
 
-        if (!mc.player.isOnGround() && !mc.player.isGliding()) {
-            if (mc.player.getEquippedStack(EquipmentSlot.CHEST).getItem() != Items.ELYTRA) {
-                mc.getNetworkHandler().sendPacket(new ClientCommandC2SPacket(mc.player, ClientCommandC2SPacket.Mode.START_FALL_FLYING));
-            }
-        }
+        int oldSlot = mc.player.getInventory().selectedSlot;
+        HitResult trace = mc.player.raycast(2, 1.0f, false);
+        if (trace instanceof BlockHitResult result) {
+            if (isMoving() && mc.player.fallDistance >= 0.8
+                    && mc.world.getBlockState(mc.player.getBlockPos()).isAir()
+                    && !mc.world.getBlockState(result.getBlockPos()).isAir()
+                    && mc.world.getBlockState(result.getBlockPos()).isSolid()
+                    && !(mc.world.getBlockState(result.getBlockPos()).getBlock() instanceof SlabBlock)
+                    && !(mc.world.getBlockState(result.getBlockPos()).getBlock() instanceof StairsBlock)) {
 
-        if (mc.player.isGliding()) {
-            if (mc.player.age % 10 == 0 && fireworkSlot != -1) {
-                useFirework(fireworkSlot);
+                mc.player.getInventory().selectedSlot = slot;
+                placed = true;
+                mc.interactionManager.interactBlock(mc.player, Hand.MAIN_HAND, result);
+                mc.player.getInventory().selectedSlot = oldSlot;
+                mc.player.fallDistance = 0;
             }
 
-            if (currentMode.equals("Grim-2.3.69")) {
-                handleGrim269();
-            } else if (currentMode.equals("Grim-2.3.71")) {
-                handleGrim271();
+            mc.options.jumpKey.setPressed(false);
+
+            if ((mc.player.isOnGround() && !mc.options.jumpKey.isPressed())
+                    && placed
+                    && mc.world.getBlockState(mc.player.getBlockPos()).isAir()
+                    && !mc.world.getBlockState(result.getBlockPos()).isAir()
+                    && mc.world.getBlockState(result.getBlockPos()).isSolid()
+                    && !(mc.world.getBlockState(result.getBlockPos()).getBlock() instanceof SlabBlock)
+                    && slapTimer.hasReached(750)) {
+
+                mc.player.setPose(Pose.STANDING);
+                slapTimer.reset();
+                placed = false;
+            } else if ((mc.player.isOnGround() && !mc.options.jumpKey.isPressed())) {
+                mc.player.jump();
+                placed = false;
+            }
+        } else {
+            if ((mc.player.isOnGround() && !mc.options.jumpKey.isPressed())) {
+                mc.player.jump();
+                placed = false;
             }
         }
     }
 
-    private static void handleGrim269() {
-        if (elytraPacketCounter % 3 == 0) {
-            mc.player.setPosition(
-                    mc.player.getX() + (ThreadLocalRandom.current().nextDouble() - 0.5) * 0.02,
-                    mc.player.getY(),
-                    mc.player.getZ() + (ThreadLocalRandom.current().nextDouble() - 0.5) * 0.02
-            );
+    private int findSlabInHotbar() {
+        for (int i = 0; i < 9; i++) {
+            ItemStack stack = mc.player.getInventory().getStack(i);
+            if (!stack.isEmpty() && stack.getItem() == Items.SMOOTH_STONE_SLAB) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    private boolean isMoving() {
+        return mc.player.forwardSpeed != 0 || mc.player.sidewaysSpeed != 0;
+    }
+
+    // ======================== Matrix ========================
+    private void updateMatrix() {
+        if (!canBoost) {
+            mc.player.setVelocity(0, 0, 0);
         }
 
-        if (elytraPacketCounter % 5 == 0) {
-            for (int i = 0; i < 2; i++) {
-                mc.getNetworkHandler().sendPacket(new PlayerMoveC2SPacket.PositionAndOnGround(
-                        mc.player.getX() + (ThreadLocalRandom.current().nextDouble() - 0.5) * 0.03,
-                        mc.player.getY() + (ThreadLocalRandom.current().nextDouble() - 0.5) * 0.02,
-                        mc.player.getZ() + (ThreadLocalRandom.current().nextDouble() - 0.5) * 0.03,
-                        false,
-                        false
-                ));
+        if (!sent) {
+            mc.player.setVelocity(0, 0, 0);
+            if (ticks > matrixTicks) {
+                sent = true;
+                ticks = 0;
+                canBoost = true;
+                // сброс таймера (не используется)
             }
         }
 
-        if (ThreadLocalRandom.current().nextFloat() < 0.2) {
-            mc.player.setVelocity(
-                    mc.player.getVelocity().x * (0.95 + ThreadLocalRandom.current().nextDouble() * 0.1),
-                    mc.player.getVelocity().y * (0.95 + ThreadLocalRandom.current().nextDouble() * 0.1),
-                    mc.player.getVelocity().z * (0.95 + ThreadLocalRandom.current().nextDouble() * 0.1)
-            );
-        }
-        elytraPacketCounter++;
-    }
-
-    private static void handleGrim271() {
-        if (elytraPacketCounter % 2 == 0) {
-            mc.player.setPosition(
-                    mc.player.getX() + (ThreadLocalRandom.current().nextDouble() - 0.5) * 0.03,
-                    mc.player.getY(),
-                    mc.player.getZ() + (ThreadLocalRandom.current().nextDouble() - 0.5) * 0.03
-            );
-        }
-
-        if (elytraPacketCounter % 4 == 0) {
-            for (int i = 0; i < 3; i++) {
-                mc.getNetworkHandler().sendPacket(new PlayerMoveC2SPacket.PositionAndOnGround(
-                        mc.player.getX() + (ThreadLocalRandom.current().nextDouble() - 0.5) * 0.04,
-                        mc.player.getY() + (ThreadLocalRandom.current().nextDouble() - 0.5) * 0.03,
-                        mc.player.getZ() + (ThreadLocalRandom.current().nextDouble() - 0.5) * 0.04,
-                        false,
-                        false
-                ));
+        if (canBoost) {
+            // Установка скорости
+            double yaw = Math.toRadians(mc.player.getYaw());
+            double motionX = -Math.sin(yaw) * matrixSpeed;
+            double motionZ = Math.cos(yaw) * matrixSpeed;
+            mc.player.setVelocity(motionX, 0.42, motionZ);
+            // Отключаем после рывка (как в оригинале)
+            // В оригинале отключается при флаге, но мы сделаем через 10 тиков после рывка
+            if (ticks > 10) {
+                enabled = false;
+                LOGGER.info("LongJump disabled after boost.");
+                onDisable();
             }
         }
 
-        if (ThreadLocalRandom.current().nextFloat() < 0.3) {
-            mc.player.setVelocity(
-                    mc.player.getVelocity().x * (0.9 + ThreadLocalRandom.current().nextDouble() * 0.2),
-                    mc.player.getVelocity().y * (0.9 + ThreadLocalRandom.current().nextDouble() * 0.2),
-                    mc.player.getVelocity().z * (0.9 + ThreadLocalRandom.current().nextDouble() * 0.2)
-            );
-        }
-        elytraPacketCounter++;
+        ticks++;
     }
 
-    private static void useFirework(int slot) {
-        int currentSlot = mc.player.getInventory().selectedSlot;
-        mc.player.getInventory().selectedSlot = slot;
-        mc.player.swingHand(Hand.MAIN_HAND);
-        // Отправляем пакет использования предмета (в 1.21.4 нужно 4 параметра)
-        mc.getNetworkHandler().sendPacket(new PlayerInteractItemC2SPacket(Hand.MAIN_HAND, 0, 0.0f, 0.0f));
-        mc.player.getInventory().selectedSlot = currentSlot;
+    // ======================== StopWatch (аналог) ========================
+    private static class StopWatch {
+        private long lastMillis = 0;
+
+        public StopWatch() {
+            reset();
+        }
+
+        public void reset() {
+            lastMillis = System.currentTimeMillis();
+        }
+
+        public boolean hasReached(long delay) {
+            return System.currentTimeMillis() - lastMillis >= delay;
+        }
     }
 }
