@@ -35,7 +35,7 @@ public class SpeedMod implements ModInitializer {
     private static boolean flyEnabled = false;
     private static boolean airStuckEnabled = false;
 
-    // === Параметры KillAura (все обходы) ===
+    // === Параметры KillAura ===
     private static final double KA_RANGE = 4.5;
     private static final double KA_MIN_DELAY = 0.680;
     private static final double KA_MAX_DELAY = 0.700;
@@ -53,14 +53,14 @@ public class SpeedMod implements ModInitializer {
     private static boolean kaIsShiftPhase = true;
     private static LivingEntity kaLockedTarget = null;
 
-    // === Параметры Fly (PolarFlyX) ===
+    // === Параметры Fly ===
     private static final double FLY_HORIZONTAL_SPEED = 6.8;
     private static final double FLY_MANUAL_VERTICAL_SPEED = 8.25;
     private static final double FLY_CYCLE_VERTICAL_SPEED = 0.10;
     private static boolean flyGoingUp = true;
     private static boolean flySentStartFalling = false;
 
-    // === Параметры AirStuck (AirStuckBug) ===
+    // === Параметры AirStuck ===
     private static final double AIRSTUCK_SPEED = 0.2;
     private static int airStuckTickCounter = 0;
 
@@ -270,6 +270,7 @@ public class SpeedMod implements ModInitializer {
                     mc.player.getX(),
                     mc.player.getY() - 0.001,
                     mc.player.getZ(),
+                    false,
                     false
             ));
         }
@@ -306,7 +307,8 @@ public class SpeedMod implements ModInitializer {
                         mc.player.getX(),
                         mc.player.getY(),
                         mc.player.getZ(),
-                        true
+                        true,
+                        false
                 ));
             }
         }
