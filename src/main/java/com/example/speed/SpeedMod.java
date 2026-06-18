@@ -21,10 +21,10 @@ public class SpeedMod implements ModInitializer {
     private static final Random random = new Random();
     private long lastAttackTime = 0;
 
-    // === Настройки ===
+    // === Настройки (задержка изменена) ===
     private static final double RANGE = 4.5;
-    private static final double MIN_DELAY = 0.690;
-    private static final double MAX_DELAY = 0.750;
+    private static final double MIN_DELAY = 0.680;   // теперь 0.680
+    private static final double MAX_DELAY = 0.700;   // теперь 0.700
     private static final boolean SPRINT_RESET = true;
     private static final float SMOOTH_SPEED = 0.15f;
 
@@ -61,7 +61,7 @@ public class SpeedMod implements ModInitializer {
                             enabled = !enabled;
                             if (!enabled) lockedTarget = null;
                             LOGGER.info("KillAura: " + (enabled ? "ON" : "OFF"));
-                            Thread.sleep(300); // дебаунс
+                            Thread.sleep(300);
                         }
                     }
 
