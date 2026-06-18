@@ -1,67 +1,92 @@
-package com.example.speed;
-
-import net.fabricmc.api.ModInitializer;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.entity.attribute.EntityAttributeInstance;
-import net.minecraft.entity.attribute.EntityAttributeModifier;
-import net.minecraft.entity.attribute.EntityAttributes;
-import net.minecraft.util.Identifier;
-import org.lwjgl.glfw.GLFW;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
-public class SpeedMod implements ModInitializer {
-    public static final String MOD_ID = "speedmod";
-    public static final Logger LOGGER = LoggerFactory.getLogger(MOD_ID);
-
-    private static boolean enabled = false;
-    private static final double MULTIPLIER = 4.0; // БЫЛО 2.0, ТЕПЕРЬ 4.0
-    private static final Identifier MODIFIER_ID = Identifier.of("speedmod", "boost");
-
-    private Thread keyThread;
-    private volatile boolean running = true;
-
-    @Override
-    public void onInitialize() {
-        LOGGER.info("SpeedMod loaded. Press R to toggle (x4 speed).");
-
-        keyThread = new Thread(() -> {
-            MinecraftClient client = MinecraftClient.getInstance();
-            while (running) {
-                try {
-                    if (client != null && client.player != null && client.getWindow() != null) {
-                        long window = client.getWindow().getHandle();
-                        if (GLFW.glfwGetKey(window, GLFW.GLFW_KEY_R) == GLFW.GLFW_PRESS) {
-                            enabled = !enabled;
-                            updateSpeed(client);
-                            LOGGER.info("SpeedMod: " + (enabled ? "ON (x4)" : "OFF"));
-                            Thread.sleep(300);
-                        }
-                    }
-                    Thread.sleep(50);
-                } catch (Exception ignored) {}
-            }
-        });
-        keyThread.setDaemon(true);
-        keyThread.start();
-    }
-
-    private void updateSpeed(MinecraftClient client) {
-        if (client.player == null) return;
-        EntityAttributeInstance speed = client.player.getAttributeInstance(EntityAttributes.MOVEMENT_SPEED);
-        if (speed == null) return;
-
-        speed.removeModifier(MODIFIER_ID);
-
-        if (enabled) {
-            double base = speed.getBaseValue();
-            double added = base * MULTIPLIER - base;
-            EntityAttributeModifier modifier = new EntityAttributeModifier(
-                    MODIFIER_ID,
-                    added,
-                    EntityAttributeModifier.Operation.ADD_VALUE
-            );
-            speed.addPersistentModifier(modifier);
+case "Vanilla":
+    if (MoveUtil.motYstate() == 0) {
+        if (MoveUtil.getdir() != -1.0F) {
+            mothor = deffval;
+        }
+    } else if (MoveUtil.motYstate() > 0) {
+        mothor = 0.0;
+        motver = deffval;
+        if (MoveUtil.getdir() != -1.0F) {
+            motver = deffval / Math.sqrt(2.0) / divval;
+            mothor = deffval / Math.sqrt(2.0) / divval;
+        }
+    } else if (MoveUtil.motYstate() < 0) {
+        mothor = 0.0;
+        motver = -deffval;
+        if (MoveUtil.getdir() != -1.0F) {
+            motver = -deffval / Math.sqrt(2.0) / divval;
+            mothor = deffval / Math.sqrt(2.0) / divval;
         }
     }
-}
+
+    int tries = (int) MFPacketCount.getValue();
+    if (pc.lastTptimer.hasTimeElapsed(4000L, false)) {
+        this.flydelay = 3;
+    }
+
+    if (this.flydelay > 0) {
+        tries = 1;
+        mothor = 0.0;
+        motver = 0.0;
+    } else {
+        tries = (int) MFPacketCount.getValue();
+    }
+
+    if ((mothor != 0.0 || motver != 0.0 || this.flydelay > 0) && Client.instance.flagsch.getFlags().size() <= 0) {
+        if (MFRotFix.isEnabled()) {
+            PacketHelper.Values.sendPacket(new PositionAndOnGround(nx, pc.LastPosY, nz, false, false), 10, true);
+            pc.LastTpNum++;
+            PacketHelper.Values.sendPacket(new TeleportConfirmC2SPacket(pc.LastTpNum));
+            Client.instance
+                .flagsch
+                .getFlags()
+                .addFirst(new FlagHelper.SkippedFlag(pc.LastPosX, pc.LastPosY, pc.LastPosZ, pc.LastTpNum, false, false));
+        }
+
+        pc.lastTptimer.reset();
+
+        for (int ix = 0; ix < tries; ix++) {
+            nx = pc.LastPosX + 90.0 + Math.random() * 90.0;
+            nz = pc.LastPosZ + 90.0 + Math.random() * 90.0;
+            if (index1 > 0) {
+                PacketHelper.Values.sendPacket(
+                    new PositionAndOnGround(pc.LastPosX + xt * mothor, pc.LastPosY + motver, pc.LastPosZ + zt * mothor, false, false), 10, true
+                );
+            }
+
+            PacketHelper.Values.sendPacket(new Full(nx, pc.LastPosY, nz, pc.LastYaw, pc.LastPitch, false, false), 10, true);
+            pc.LastTpNum++;
+            PacketHelper.Values.sendPacket(new TeleportConfirmC2SPacket(pc.LastTpNum));
+            Client.instance
+                .flagsch
+                .getFlags()
+                .addFirst(new FlagHelper.SkippedFlag(pc.LastPosX, pc.LastPosY, pc.LastPosZ, pc.LastTpNum, false, false));
+            if (index1 > 0) {
+                mc.player.setPosition(pc.LastPosX + xt * mothor, pc.LastPosY + motver, pc.LastPosZ + zt * mothor);
+                pc.LastPosX = mc.player.getX();
+                pc.LastPosY = mc.player.getY();
+                pc.LastPosZ = mc.player.getZ();
+            }
+
+            Disabler.savedabusepacket--;
+        }
+
+        if (MFRotFix.isEnabled()) {
+            pc.LastYaw = this.fixedyaw;
+            pc.LastPitch = this.fixedpitch;
+            this.flytype = 0;
+            Disabler.savedabusepacket--;
+            PacketHelper.Values.sendPacket(
+                new Full(pc.LastPosX, pc.LastPosY, pc.LastPosZ, pc.LastYaw, pc.LastPitch, false, false), 10, true
+            );
+        }
+
+        index1++;
+    }
+
+    MoveUtil.stop3();
+    TimerUtil.setTimerspeed(LowTimer.getValue());
+    if (this.flydelay > 0) {
+        this.flydelay--;
+    }
+    break;
