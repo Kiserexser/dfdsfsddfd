@@ -72,7 +72,6 @@ public class SpeedMod implements ModInitializer {
                         continue;
                     }
 
-                    // === Обновление фазы смещения ===
                     long now = System.currentTimeMillis();
                     long elapsed = now - shiftCycleStart;
                     if (isShiftPhase && elapsed >= SHIFT_DURATION_MS) {
@@ -83,7 +82,6 @@ public class SpeedMod implements ModInitializer {
                         shiftCycleStart = now;
                     }
 
-                    // === Поиск цели ===
                     LivingEntity target = null;
                     if (lockedTarget != null && lockedTarget.isAlive() && !lockedTarget.isDead()) {
                         double dist = client.player.distanceTo(lockedTarget);
@@ -107,7 +105,6 @@ public class SpeedMod implements ModInitializer {
                         continue;
                     }
 
-                    // === Вычисление углов ===
                     Vec3d eyePos = client.player.getEyePos();
                     Vec3d targetPos = target.getPos().add(0, target.getHeight() * 0.5, 0);
 
@@ -128,7 +125,6 @@ public class SpeedMod implements ModInitializer {
                     targetYaw = yaw + jitterYaw;
                     targetPitch = pitch + jitterPitch + shift;
 
-                    // === Применение и атака ===
                     final LivingEntity finalTarget = target;
                     final float finalYaw = targetYaw;
                     final float finalPitch = targetPitch;
@@ -191,7 +187,7 @@ public class SpeedMod implements ModInitializer {
         return from + step;
     }
 
-    // =================== GUI (нежный стиль сакура) ===================
+    // =================== GUI ===================
     private static class SettingsGUI extends Screen {
         private static final int WIDTH = 230;
         private static final int HEIGHT = 300;
@@ -229,12 +225,8 @@ public class SpeedMod implements ModInitializer {
             ).dimensions(x + 10, y + 25, 60, 20).build();
             this.addDrawableChild(toggleButton);
 
-            // === Ползунок радиуса ===
+            // === Радиус ===
             rangeSlider = new SliderWidget(x + 10, y + 55, 200, 20, Text.literal("Радиус: " + RANGE), RANGE) {
-                {
-                    setMin(1.0);
-                    setMax(8.0);
-                }
                 @Override
                 protected void updateMessage() {
                     this.setMessage(Text.literal("Радиус: " + String.format("%.1f", value)));
@@ -243,15 +235,19 @@ public class SpeedMod implements ModInitializer {
                 protected void applyValue() {
                     RANGE = value;
                 }
+                @Override
+                public double getMinValue() {
+                    return 1.0;
+                }
+                @Override
+                public double getMaxValue() {
+                    return 8.0;
+                }
             };
             this.addDrawableChild(rangeSlider);
 
             // === Мин. задержка ===
             minDelaySlider = new SliderWidget(x + 10, y + 80, 200, 20, Text.literal("Мин. задержка: " + MIN_DELAY), MIN_DELAY) {
-                {
-                    setMin(0.1);
-                    setMax(1.0);
-                }
                 @Override
                 protected void updateMessage() {
                     this.setMessage(Text.literal("Мин. задержка: " + String.format("%.3f", value)));
@@ -261,15 +257,19 @@ public class SpeedMod implements ModInitializer {
                     MIN_DELAY = value;
                     if (MIN_DELAY > MAX_DELAY) MAX_DELAY = MIN_DELAY;
                 }
+                @Override
+                public double getMinValue() {
+                    return 0.1;
+                }
+                @Override
+                public double getMaxValue() {
+                    return 1.0;
+                }
             };
             this.addDrawableChild(minDelaySlider);
 
             // === Макс. задержка ===
             maxDelaySlider = new SliderWidget(x + 10, y + 105, 200, 20, Text.literal("Макс. задержка: " + MAX_DELAY), MAX_DELAY) {
-                {
-                    setMin(0.1);
-                    setMax(1.0);
-                }
                 @Override
                 protected void updateMessage() {
                     this.setMessage(Text.literal("Макс. задержка: " + String.format("%.3f", value)));
@@ -279,15 +279,19 @@ public class SpeedMod implements ModInitializer {
                     MAX_DELAY = value;
                     if (MAX_DELAY < MIN_DELAY) MIN_DELAY = MAX_DELAY;
                 }
+                @Override
+                public double getMinValue() {
+                    return 0.1;
+                }
+                @Override
+                public double getMaxValue() {
+                    return 1.0;
+                }
             };
             this.addDrawableChild(maxDelaySlider);
 
             // === Джиттер ===
             jitterSlider = new SliderWidget(x + 10, y + 130, 200, 20, Text.literal("Джиттер: " + JITTER_RANGE), JITTER_RANGE) {
-                {
-                    setMin(0.0);
-                    setMax(1.0);
-                }
                 @Override
                 protected void updateMessage() {
                     this.setMessage(Text.literal("Джиттер: " + String.format("%.2f", value)));
@@ -296,15 +300,19 @@ public class SpeedMod implements ModInitializer {
                 protected void applyValue() {
                     JITTER_RANGE = (float) value;
                 }
+                @Override
+                public double getMinValue() {
+                    return 0.0;
+                }
+                @Override
+                public double getMaxValue() {
+                    return 1.0;
+                }
             };
             this.addDrawableChild(jitterSlider);
 
             // === Смещение ===
             shiftSlider = new SliderWidget(x + 10, y + 155, 200, 20, Text.literal("Смещение: " + SHIFT_DEGREES + "°"), SHIFT_DEGREES) {
-                {
-                    setMin(0.0);
-                    setMax(1.0);
-                }
                 @Override
                 protected void updateMessage() {
                     this.setMessage(Text.literal("Смещение: " + String.format("%.2f", value) + "°"));
@@ -313,10 +321,18 @@ public class SpeedMod implements ModInitializer {
                 protected void applyValue() {
                     SHIFT_DEGREES = (float) value;
                 }
+                @Override
+                public double getMinValue() {
+                    return 0.0;
+                }
+                @Override
+                public double getMaxValue() {
+                    return 1.0;
+                }
             };
             this.addDrawableChild(shiftSlider);
 
-            // === Кнопка-переключатель "Сброс спринта" ===
+            // === Сброс спринта (кнопка-переключатель) ===
             sprintToggle = ButtonWidget.builder(
                     Text.literal(SPRINT_RESET ? "§aСброс спринта Вкл" : "§cСброс спринта Выкл"),
                     btn -> {
@@ -326,7 +342,7 @@ public class SpeedMod implements ModInitializer {
             ).dimensions(x + 10, y + 180, 140, 20).build();
             this.addDrawableChild(sprintToggle);
 
-            // === Кнопка-переключатель "Смещение вкл" ===
+            // === Смещение вкл/выкл (кнопка-переключатель) ===
             shiftToggle = ButtonWidget.builder(
                     Text.literal(ENABLE_SHIFT ? "§aСмещение Вкл" : "§cСмещение Выкл"),
                     btn -> {
@@ -346,19 +362,16 @@ public class SpeedMod implements ModInitializer {
 
         @Override
         public void render(DrawContext context, int mouseX, int mouseY, float delta) {
-            // Белый фон с розовой рамкой
             int bgColor = 0xFFFFFF;
             int borderColor = 0xFFB6C1;
             int textColor = 0xFF69B4;
 
             context.fill(x, y, x + WIDTH, y + HEIGHT, bgColor);
-            // Рамка
             context.fill(x, y, x + WIDTH, y + 1, borderColor);
             context.fill(x, y + HEIGHT - 1, x + WIDTH, y + HEIGHT, borderColor);
             context.fill(x, y, x + 1, y + HEIGHT, borderColor);
             context.fill(x + WIDTH - 1, y, x + WIDTH, y + HEIGHT, borderColor);
 
-            // Заголовки
             context.drawCenteredTextWithShadow(textRenderer, Text.literal("§dCombat"), x + WIDTH/2, y + 5, textColor);
             context.drawTextWithShadow(textRenderer, Text.literal("§dKillAura"), x + 15, y + 28, textColor);
 
