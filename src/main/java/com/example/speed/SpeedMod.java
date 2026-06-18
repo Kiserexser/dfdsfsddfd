@@ -17,39 +17,36 @@ import java.util.Random;
 public class SpeedMod implements ModInitializer {
     public static final Logger LOGGER = LoggerFactory.getLogger("speedmod");
 
+    // ===== СТАТИЧЕСКИЕ ПЕРЕМЕННЫЕ ДЛЯ ДОСТУПА ИЗ МИКСИНА =====
     private static boolean enabled = false;
-    private static final Random random = new Random();
-    private long lastAttackTime = 0;
+    private static LivingEntity lockedTarget = null;
 
-    // === Настройки ===
+    public static boolean isEnabled() { return enabled; }
+    public static LivingEntity getLockedTarget() { return lockedTarget; }
+
+    // ===== НАСТРОЙКИ =====
     private static final double RANGE = 4.5;
     private static final double MIN_DELAY = 0.690;
     private static final double MAX_DELAY = 0.750;
     private static final boolean SPRINT_RESET = true;
     private static final float SMOOTH_SPEED = 0.15f;
 
-    // === Смещение для обхода ===
     private static final boolean ENABLE_SHIFT = true;
     private static final float SHIFT_DEGREES = 0.5f;
     private static final long SHIFT_DURATION_MS = 3000;
     private static final long RETURN_DURATION_MS = 2000;
 
-    // === Джиттер ===
     private static final float JITTER_RANGE = 0.15f;
 
     private Thread workerThread;
     private volatile boolean running = true;
 
-    // Целевые углы
     private float targetYaw = 0;
     private float targetPitch = 0;
-
-    // Фаза смещения
     private long shiftCycleStart = System.currentTimeMillis();
     private boolean isShiftPhase = true;
-
-    // ЗАФИКСИРОВАННАЯ ЦЕЛЬ
-    private LivingEntity lockedTarget = null;
+    private long lastAttackTime = 0;
+    private final Random random = new Random();
 
     @Override
     public void onInitialize() {
@@ -112,7 +109,7 @@ public class SpeedMod implements ModInitializer {
                         continue;
                     }
 
-                    // === Вычисление углов на цель ===
+                    // === Вычисление углов ===
                     Vec3d eyePos = client.player.getEyePos();
                     Vec3d targetPos = target.getPos().add(0, target.getHeight() * 0.5, 0);
 
@@ -124,11 +121,9 @@ public class SpeedMod implements ModInitializer {
                     float yaw = (float) MathHelper.atan2(dz, dx) * (180F / (float) Math.PI) - 90F;
                     float pitch = (float) -MathHelper.atan2(dy, distance) * (180F / (float) Math.PI);
 
-                    // Джиттер
                     float jitterYaw = (random.nextFloat() - 0.5f) * JITTER_RANGE * 2;
                     float jitterPitch = (random.nextFloat() - 0.5f) * JITTER_RANGE * 2;
 
-                    // Смещение
                     float shift = 0f;
                     if (ENABLE_SHIFT && isShiftPhase) {
                         shift = SHIFT_DEGREES;
@@ -141,7 +136,7 @@ public class SpeedMod implements ModInitializer {
                     targetPitch = finalPitch;
 
                     // === Плавная ротация и атака ===
-                    final LivingEntity targetFinal = target; // финальная копия для лямбды
+                    final LivingEntity targetFinal = target;
                     client.execute(() -> {
                         if (client.player == null) return;
 
