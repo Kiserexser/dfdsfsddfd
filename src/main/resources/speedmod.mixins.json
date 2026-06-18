@@ -4,8 +4,7 @@
   "package": "com.example.speed.mixin",
   "compatibilityLevel": "JAVA_21",
   "mixins": [
-    "HUDMixin",
-    "PlayerEntityMixin"
+    "HUDMixin"
   ],
   "client": [],
   "server": []
