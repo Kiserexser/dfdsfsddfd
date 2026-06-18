@@ -7,11 +7,14 @@ import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.gui.widget.ButtonWidget;
 import net.minecraft.entity.EquipmentSlot;
 import net.minecraft.entity.LivingEntity;
+import net.minecraft.item.ElytraItem;
+import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
 import net.minecraft.network.packet.c2s.play.ClientCommandC2SPacket;
 import net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket;
 import net.minecraft.sound.SoundEvents;
 import net.minecraft.text.Text;
+import net.minecraft.util.Hand;
 import net.minecraft.util.math.Box;
 import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.Vec3d;
@@ -22,6 +25,7 @@ import org.slf4j.LoggerFactory;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Random;
+import java.util.concurrent.ThreadLocalRandom;
 
 public class SpeedMod implements ModInitializer {
     public static final Logger LOGGER = LoggerFactory.getLogger("speedmod");
@@ -32,8 +36,7 @@ public class SpeedMod implements ModInitializer {
 
     // === Состояния модулей ===
     private static boolean killAuraEnabled = false;
-    private static boolean flyEnabled = false;
-    private static boolean airStuckEnabled = false;
+    private static boolean elytraFlyEnabled = false;
 
     // === Параметры KillAura ===
     private static final double KA_RANGE = 4.5;
@@ -53,19 +56,16 @@ public class SpeedMod implements ModInitializer {
     private static boolean kaIsShiftPhase = true;
     private static LivingEntity kaLockedTarget = null;
 
-    // === Параметры Fly ===
-    private static final double FLY_HORIZONTAL_SPEED = 6.8;
-    private static final double FLY_MANUAL_VERTICAL_SPEED = 8.25;
-    private static final double FLY_CYCLE_VERTICAL_SPEED = 0.10;
-    private static boolean flyGoingUp = true;
-    private static boolean flySentStartFalling = false;
-
-    // === Параметры AirStuck ===
-    private static final double AIRSTUCK_SPEED = 0.2;
-    private static int airStuckTickCounter = 0;
+    // === Параметры ElytraFly ===
+    private static final Mode elytraMode = new Mode("Normal", "Normal", "Grim-2.3.69", "Grim-2.3.71");
+    private static int elytraPacketCounter = 0;
+    private static long elytraLastActionTime = 0;
+    private static int elytraOldSlot = -1;
+    private static int elytraBestSlot = -1;
+    private static boolean elytraSlotNotNull = false;
 
     // === Дебаунс клавиш ===
-    private boolean wasR = false, wasF = false, wasG = false;
+    private boolean wasR = false, wasG = false;
     private boolean wasRightShift = false;
 
     // === Поток ===
@@ -74,7 +74,7 @@ public class SpeedMod implements ModInitializer {
 
     @Override
     public void onInitialize() {
-        LOGGER.info("SpeedMod loaded. R=KillAura, F=Fly, G=AirStuck, RightShift=GUI");
+        LOGGER.info("SpeedMod loaded. R=KillAura, G=ElytraFly, RightShift=GUI");
 
         workerThread = new Thread(() -> {
             while (running) {
@@ -83,17 +83,13 @@ public class SpeedMod implements ModInitializer {
                         long window = mc.getWindow().getHandle();
 
                         boolean rPressed = GLFW.glfwGetKey(window, GLFW.GLFW_KEY_R) == GLFW.GLFW_PRESS;
-                        boolean fPressed = GLFW.glfwGetKey(window, GLFW.GLFW_KEY_F) == GLFW.GLFW_PRESS;
                         boolean gPressed = GLFW.glfwGetKey(window, GLFW.GLFW_KEY_G) == GLFW.GLFW_PRESS;
                         boolean rightShiftPressed = GLFW.glfwGetKey(window, GLFW.GLFW_KEY_RIGHT_SHIFT) == GLFW.GLFW_PRESS;
 
                         if (rPressed && !wasR) { toggleKillAura(); wasR = true; }
                         else if (!rPressed) wasR = false;
 
-                        if (fPressed && !wasF) { toggleFly(); wasF = true; }
-                        else if (!fPressed) wasF = false;
-
-                        if (gPressed && !wasG) { toggleAirStuck(); wasG = true; }
+                        if (gPressed && !wasG) { toggleElytraFly(); wasG = true; }
                         else if (!gPressed) wasG = false;
 
                         if (rightShiftPressed && !wasRightShift) {
@@ -104,8 +100,7 @@ public class SpeedMod implements ModInitializer {
 
                     if (mc != null && mc.player != null && mc.world != null) {
                         if (killAuraEnabled) updateKillAura();
-                        if (flyEnabled) updateFly();
-                        if (airStuckEnabled) updateAirStuck();
+                        if (elytraFlyEnabled) updateElytraFly();
                     }
 
                     Thread.sleep(10);
@@ -199,121 +194,148 @@ public class SpeedMod implements ModInitializer {
         });
     }
 
-    // ======================== Fly ========================
-    private static void toggleFly() {
-        flyEnabled = !flyEnabled;
-        if (flyEnabled) {
-            if (mc.player != null && mc.player.getEquippedStack(EquipmentSlot.CHEST).getItem() == Items.ELYTRA) {
-                if (mc.getNetworkHandler() != null) {
-                    mc.getNetworkHandler().sendPacket(new ClientCommandC2SPacket(mc.player, ClientCommandC2SPacket.Mode.START_FALL_FLYING));
-                    flySentStartFalling = true;
+    // ======================== ElytraFly ========================
+    private static void toggleElytraFly() {
+        elytraFlyEnabled = !elytraFlyEnabled;
+        if (!elytraFlyEnabled) {
+            elytraPacketCounter = 0;
+        }
+        LOGGER.info("ElytraFly: " + (elytraFlyEnabled ? "ON" : "OFF"));
+        mc.execute(() -> { if (mc.player != null) mc.player.playSound(SoundEvents.UI_BUTTON_CLICK.value(), 1f, 1f); });
+    }
+
+    private static void updateElytraFly() {
+        if (mc.player == null) return;
+
+        // Поиск элитры и фейерверков
+        int elytraSlot = -1;
+        for (int i = 0; i < 36; i++) {
+            ItemStack stack = mc.player.getInventory().getStack(i);
+            if (stack.getItem() instanceof ElytraItem) {
+                elytraSlot = i;
+                break;
+            }
+        }
+
+        int fireworkSlot = -1;
+        for (int i = 0; i < 36; i++) {
+            ItemStack stack = mc.player.getInventory().getStack(i);
+            if (stack.getItem() == Items.FIREWORK_ROCKET) {
+                fireworkSlot = i;
+                break;
+            }
+        }
+
+        // Если нет элитры или фейерверков – выключаем модуль
+        if (elytraSlot == -1 || fireworkSlot == -1) {
+            if (elytraFlyEnabled) {
+                LOGGER.warn("ElytraFly: missing elytra or fireworks! Disabling.");
+                elytraFlyEnabled = false;
+            }
+            return;
+        }
+
+        // Если не в полёте и не на земле – пытаемся надеть элитру и стартовать
+        if (!mc.player.isOnGround() && !mc.player.isElytraFlying()) {
+            // Надеваем элитру
+            if (!(mc.player.getEquippedStack(EquipmentSlot.CHEST).getItem() instanceof ElytraItem)) {
+                mc.getNetworkHandler().sendPacket(new ClientCommandC2SPacket(mc.player, ClientCommandC2SPacket.Mode.START_FALL_FLYING));
+            }
+        }
+
+        // Если в полёте – применяем обходы
+        if (mc.player.isElytraFlying()) {
+            String mode = elytraMode.getValue();
+            if (mode.equals("Grim-2.3.69")) {
+                handleGrim269();
+            } else if (mode.equals("Grim-2.3.71")) {
+                handleGrim271();
+            } else {
+                // Normal – просто используем фейерверки для ускорения
+                if (mc.player.age % 10 == 0 && fireworkSlot != -1) {
+                    useFirework(fireworkSlot);
                 }
             }
-            if (mc.player != null) {
-                mc.player.setVelocity(0, 0.03, 0);
-                mc.player.fallDistance = 0f;
-            }
-        } else {
-            if (mc.player != null) {
-                mc.player.setVelocity(0, mc.player.getVelocity().y, 0);
-                flySentStartFalling = false;
-            }
-        }
-        LOGGER.info("Fly: " + (flyEnabled ? "ON" : "OFF"));
-        mc.execute(() -> { if (mc.player != null) mc.player.playSound(SoundEvents.UI_BUTTON_CLICK.value(), 1f, 1f); });
-    }
-
-    private static void updateFly() {
-        if (mc.player == null) return;
-
-        if (!flySentStartFalling && mc.player.getEquippedStack(EquipmentSlot.CHEST).getItem() == Items.ELYTRA) {
-            if (mc.getNetworkHandler() != null) {
-                mc.getNetworkHandler().sendPacket(new ClientCommandC2SPacket(mc.player, ClientCommandC2SPacket.Mode.START_FALL_FLYING));
-                flySentStartFalling = true;
-            }
-        }
-
-        double yaw = Math.toRadians(mc.player.getYaw());
-        double motionX = 0, motionZ = 0, motionY = 0;
-
-        if (mc.options.forwardKey.isPressed()) {
-            motionX -= Math.sin(yaw) * FLY_HORIZONTAL_SPEED;
-            motionZ += Math.cos(yaw) * FLY_HORIZONTAL_SPEED;
-        }
-        if (mc.options.backKey.isPressed()) {
-            motionX += Math.sin(yaw) * FLY_HORIZONTAL_SPEED;
-            motionZ -= Math.cos(yaw) * FLY_HORIZONTAL_SPEED;
-        }
-        if (mc.options.leftKey.isPressed()) {
-            motionX -= Math.cos(yaw) * FLY_HORIZONTAL_SPEED;
-            motionZ -= Math.sin(yaw) * FLY_HORIZONTAL_SPEED;
-        }
-        if (mc.options.rightKey.isPressed()) {
-            motionX += Math.cos(yaw) * FLY_HORIZONTAL_SPEED;
-            motionZ += Math.sin(yaw) * FLY_HORIZONTAL_SPEED;
-        }
-
-        if (mc.options.jumpKey.isPressed()) {
-            motionY = FLY_MANUAL_VERTICAL_SPEED;
-        } else if (mc.options.sneakKey.isPressed()) {
-            motionY = -1.4;
-        } else {
-            motionY = flyGoingUp ? FLY_CYCLE_VERTICAL_SPEED : -FLY_CYCLE_VERTICAL_SPEED;
-            if (mc.player.age % 2 == 0) flyGoingUp = !flyGoingUp;
-        }
-
-        mc.player.fallDistance = 0f;
-        mc.player.setVelocity(motionX, motionY, motionZ);
-
-        if (mc.getNetworkHandler() != null && mc.player.age % 5 == 0) {
-            mc.getNetworkHandler().sendPacket(new PlayerMoveC2SPacket.PositionAndOnGround(
-                    mc.player.getX(),
-                    mc.player.getY() - 0.001,
-                    mc.player.getZ(),
-                    false,
-                    false
-            ));
         }
     }
 
-    // ======================== AirStuck ========================
-    private static void toggleAirStuck() {
-        airStuckEnabled = !airStuckEnabled;
-        if (!airStuckEnabled && mc.player != null) {
-            mc.player.setVelocity(0, mc.player.getVelocity().y, 0);
-        }
-        LOGGER.info("AirStuck: " + (airStuckEnabled ? "ON" : "OFF"));
-        mc.execute(() -> { if (mc.player != null) mc.player.playSound(SoundEvents.UI_BUTTON_CLICK.value(), 1f, 1f); });
-    }
-
-    private static void updateAirStuck() {
-        if (mc.player == null) return;
-
-        if (!mc.player.isGliding()) {
-            if (mc.options.forwardKey.isPressed()) {
-                float yaw = mc.player.getYaw();
-                double motionX = -Math.sin(Math.toRadians(yaw)) * AIRSTUCK_SPEED;
-                double motionZ = Math.cos(Math.toRadians(yaw)) * AIRSTUCK_SPEED;
-                mc.player.setVelocity(motionX, 0, motionZ);
-            } else {
-                mc.player.setVelocity(0, 0, 0);
-            }
-        }
-
-        airStuckTickCounter++;
-        if (airStuckTickCounter % 2 == 0) {
-            if (mc.getNetworkHandler() != null) {
-                mc.getNetworkHandler().sendPacket(new PlayerMoveC2SPacket.PositionAndOnGround(
-                        mc.player.getX(),
+    private static void handleGrim269() {
+        if (mc.player.isElytraFlying()) {
+            if (elytraPacketCounter % 3 == 0) {
+                mc.player.setPosition(
+                        mc.player.getX() + (ThreadLocalRandom.current().nextDouble() - 0.5) * 0.02,
                         mc.player.getY(),
-                        mc.player.getZ(),
-                        true,
-                        false
-                ));
+                        mc.player.getZ() + (ThreadLocalRandom.current().nextDouble() - 0.5) * 0.02
+                );
+            }
+
+            if (elytraPacketCounter % 5 == 0) {
+                for (int i = 0; i < 2; i++) {
+                    mc.getNetworkHandler().sendPacket(new PlayerMoveC2SPacket.PositionAndOnGround(
+                            mc.player.getX() + (ThreadLocalRandom.current().nextDouble() - 0.5) * 0.03,
+                            mc.player.getY() + (ThreadLocalRandom.current().nextDouble() - 0.5) * 0.02,
+                            mc.player.getZ() + (ThreadLocalRandom.current().nextDouble() - 0.5) * 0.03,
+                            false,
+                            false
+                    ));
+                }
+            }
+
+            if (ThreadLocalRandom.current().nextFloat() < 0.2) {
+                double motionX = mc.player.getVelocity().x * (0.95 + ThreadLocalRandom.current().nextDouble() * 0.1);
+                double motionY = mc.player.getVelocity().y * (0.95 + ThreadLocalRandom.current().nextDouble() * 0.1);
+                double motionZ = mc.player.getVelocity().z * (0.95 + ThreadLocalRandom.current().nextDouble() * 0.1);
+                mc.player.setVelocity(motionX, motionY, motionZ);
             }
         }
+        elytraPacketCounter++;
+    }
 
-        mc.player.fallDistance = 0f;
+    private static void handleGrim271() {
+        if (mc.player.isElytraFlying()) {
+            if (elytraPacketCounter % 2 == 0) {
+                mc.player.setPosition(
+                        mc.player.getX() + (ThreadLocalRandom.current().nextDouble() - 0.5) * 0.03,
+                        mc.player.getY(),
+                        mc.player.getZ() + (ThreadLocalRandom.current().nextDouble() - 0.5) * 0.03
+                );
+            }
+
+            if (elytraPacketCounter % 4 == 0) {
+                for (int i = 0; i < 3; i++) {
+                    mc.getNetworkHandler().sendPacket(new PlayerMoveC2SPacket.PositionAndOnGround(
+                            mc.player.getX() + (ThreadLocalRandom.current().nextDouble() - 0.5) * 0.04,
+                            mc.player.getY() + (ThreadLocalRandom.current().nextDouble() - 0.5) * 0.03,
+                            mc.player.getZ() + (ThreadLocalRandom.current().nextDouble() - 0.5) * 0.04,
+                            false,
+                            false
+                    ));
+                }
+            }
+
+            if (ThreadLocalRandom.current().nextFloat() < 0.3) {
+                double motionX = mc.player.getVelocity().x * (0.9 + ThreadLocalRandom.current().nextDouble() * 0.2);
+                double motionY = mc.player.getVelocity().y * (0.9 + ThreadLocalRandom.current().nextDouble() * 0.2);
+                double motionZ = mc.player.getVelocity().z * (0.9 + ThreadLocalRandom.current().nextDouble() * 0.2);
+                mc.player.setVelocity(motionX, motionY, motionZ);
+            }
+        }
+        elytraPacketCounter++;
+    }
+
+    private static void useFirework(int slot) {
+        // Временно меняем слот, используем фейерверк, возвращаем слот
+        int currentSlot = mc.player.getInventory().selectedSlot;
+        mc.player.getInventory().selectedSlot = slot;
+        mc.player.swingHand(Hand.MAIN_HAND);
+        mc.getNetworkHandler().sendPacket(new PlayerMoveC2SPacket.PositionAndOnGround(
+                mc.player.getX(),
+                mc.player.getY(),
+                mc.player.getZ(),
+                false,
+                false
+        ));
+        mc.player.getInventory().selectedSlot = currentSlot;
     }
 
     // ======================== Вспомогательные методы ========================
@@ -335,10 +357,37 @@ public class SpeedMod implements ModInitializer {
         return from + step;
     }
 
+    // ======================== Mode (для ElytraFly) ========================
+    private static class Mode {
+        private final String[] values;
+        private int index;
+        private final String defaultValue;
+
+        public Mode(String defaultValue, String... values) {
+            this.defaultValue = defaultValue;
+            this.values = values;
+            this.index = 0;
+            for (int i = 0; i < values.length; i++) {
+                if (values[i].equals(defaultValue)) {
+                    this.index = i;
+                    break;
+                }
+            }
+        }
+
+        public String getValue() {
+            return values[index];
+        }
+
+        public void cycle() {
+            index = (index + 1) % values.length;
+        }
+    }
+
     // ======================== GUI ========================
     private static class SpeedModGUI extends Screen {
         private static final int WIDTH = 180;
-        private static final int HEIGHT = 140;
+        private static final int HEIGHT = 100;
         private int x, y;
 
         protected SpeedModGUI() {
@@ -354,20 +403,14 @@ public class SpeedMod implements ModInitializer {
             ButtonWidget killAuraBtn = ButtonWidget.builder(
                     Text.literal("KillAura: " + (killAuraEnabled ? "§aON" : "§cOFF")),
                     btn -> toggleKillAura()
-            ).dimensions(x + 10, y + 30, 160, 20).build();
+            ).dimensions(x + 10, y + 20, 160, 20).build();
             this.addDrawableChild(killAuraBtn);
 
-            ButtonWidget flyBtn = ButtonWidget.builder(
-                    Text.literal("Fly: " + (flyEnabled ? "§aON" : "§cOFF")),
-                    btn -> toggleFly()
-            ).dimensions(x + 10, y + 60, 160, 20).build();
-            this.addDrawableChild(flyBtn);
-
-            ButtonWidget airStuckBtn = ButtonWidget.builder(
-                    Text.literal("AirStuck: " + (airStuckEnabled ? "§aON" : "§cOFF")),
-                    btn -> toggleAirStuck()
-            ).dimensions(x + 10, y + 90, 160, 20).build();
-            this.addDrawableChild(airStuckBtn);
+            ButtonWidget elytraFlyBtn = ButtonWidget.builder(
+                    Text.literal("ElytraFly: " + (elytraFlyEnabled ? "§aON" : "§cOFF")),
+                    btn -> toggleElytraFly()
+            ).dimensions(x + 10, y + 50, 160, 20).build();
+            this.addDrawableChild(elytraFlyBtn);
 
             ButtonWidget closeBtn = ButtonWidget.builder(
                     Text.literal("Закрыть"),
@@ -388,7 +431,7 @@ public class SpeedMod implements ModInitializer {
             context.fill(x, y, x + 1, y + HEIGHT, borderColor);
             context.fill(x + WIDTH - 1, y, x + WIDTH, y + HEIGHT, borderColor);
 
-            context.drawCenteredTextWithShadow(textRenderer, Text.literal("§dSpeedMod Controls"), x + WIDTH/2, y + 8, textColor);
+            context.drawCenteredTextWithShadow(textRenderer, Text.literal("§dSpeedMod Controls"), x + WIDTH/2, y + 5, textColor);
 
             super.render(context, mouseX, mouseY, delta);
         }
