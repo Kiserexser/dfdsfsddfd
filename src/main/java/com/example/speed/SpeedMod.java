@@ -103,13 +103,13 @@ public class SpeedMod implements ModInitializer {
             return;
         }
 
-        if (!mc.player.isOnGround() && !mc.player.isFallFlying()) {
+        if (!mc.player.isOnGround() && !mc.player.isGliding()) {
             if (mc.player.getEquippedStack(EquipmentSlot.CHEST).getItem() != Items.ELYTRA) {
                 mc.getNetworkHandler().sendPacket(new ClientCommandC2SPacket(mc.player, ClientCommandC2SPacket.Mode.START_FALL_FLYING));
             }
         }
 
-        if (mc.player.isFallFlying()) {
+        if (mc.player.isGliding()) {
             if (mc.player.age % 10 == 0 && fireworkSlot != -1) {
                 useFirework(fireworkSlot);
             }
@@ -188,7 +188,8 @@ public class SpeedMod implements ModInitializer {
         int currentSlot = mc.player.getInventory().selectedSlot;
         mc.player.getInventory().selectedSlot = slot;
         mc.player.swingHand(Hand.MAIN_HAND);
-        mc.getNetworkHandler().sendPacket(new PlayerInteractItemC2SPacket(Hand.MAIN_HAND, 0));
+        // Отправляем пакет использования предмета (в 1.21.4 нужно 4 параметра)
+        mc.getNetworkHandler().sendPacket(new PlayerInteractItemC2SPacket(Hand.MAIN_HAND, 0, 0.0f, 0.0f));
         mc.player.getInventory().selectedSlot = currentSlot;
     }
 }
