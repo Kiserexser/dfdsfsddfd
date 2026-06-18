@@ -3,14 +3,13 @@
   "id": "speedmod",
   "version": "${version}",
   "name": "Speed Mod",
-  "description": "KillAura with HUD",
+  "description": "KillAura with bypasses",
   "authors": [],
   "license": "MIT",
   "environment": "client",
   "entrypoints": {
     "main": ["com.example.speed.SpeedMod"]
   },
-  "mixins": ["speedmod.mixins.json"],
   "depends": {
     "fabricloader": ">=0.15.11",
     "minecraft": "1.21.4"
