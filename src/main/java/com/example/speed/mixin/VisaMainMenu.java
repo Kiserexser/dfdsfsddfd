@@ -80,7 +80,7 @@ public class VisaMainMenu extends Screen {
             context.drawBorder(this.getX(), this.getY(),
                     this.getWidth(), this.getHeight(),
                     BORDER_COLOR);
-            context.drawCenteredTextWithShadow(this.textRenderer, this.getMessage(),
+            context.drawCenteredTextWithShadow(MinecraftClient.getInstance().textRenderer, this.getMessage(),
                     this.getX() + this.getWidth() / 2,
                     this.getY() + (this.getHeight() - 8) / 2,
                     0x333333);
