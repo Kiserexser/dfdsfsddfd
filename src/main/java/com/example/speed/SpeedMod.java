@@ -17,22 +17,25 @@ public class SpeedMod implements ModInitializer {
     private static float speedMultiplier = 2.0f;
     private static float energy = 0.0f;
     private static long lastSetbackTime = 0;
-    private static float normalTickDelta = 1.0f;
 
     private boolean wasK = false, wasZ = false, wasX = false, wasC = false, wasV = false;
 
     private Thread workerThread;
     private volatile boolean running = true;
 
+    private static Field timerField;
     private static Field tickDeltaField;
 
     static {
         try {
-            Class<?> timerClass = Class.forName("net.minecraft.client.Timer");
-            tickDeltaField = timerClass.getDeclaredField("tickDelta");
-            tickDeltaField.setAccessible(true);
+            // Поле timer в MinecraftClient
+            timerField = MinecraftClient.class.getDeclaredField("timer");
+            timerField.setAccessible(true);
+
+            // Поле tickDelta в классе Timer (это внутренний класс, но мы получаем его через объект)
+            // Но мы не можем получить класс Timer напрямую, поэтому получим поле tickDelta через объект таймера позже.
         } catch (Exception e) {
-            LOGGER.error("Could not find tickDelta field", e);
+            LOGGER.error("Could not find timer field", e);
         }
     }
 
@@ -46,7 +49,6 @@ public class SpeedMod implements ModInitializer {
                     if (mc != null && mc.getWindow() != null) {
                         long window = mc.getWindow().getHandle();
 
-                        // === K – включить/выключить ===
                         boolean kPressed = GLFW.glfwGetKey(window, GLFW.GLFW_KEY_K) == GLFW.GLFW_PRESS;
                         if (kPressed && !wasK) {
                             enabled = !enabled;
@@ -55,7 +57,6 @@ public class SpeedMod implements ModInitializer {
                             wasK = true;
                         } else if (!kPressed) wasK = false;
 
-                        // === Переключение режимов (только если включён) ===
                         if (enabled) {
                             boolean z = GLFW.glfwGetKey(window, GLFW.GLFW_KEY_Z) == GLFW.GLFW_PRESS;
                             boolean x = GLFW.glfwGetKey(window, GLFW.GLFW_KEY_X) == GLFW.GLFW_PRESS;
@@ -76,13 +77,8 @@ public class SpeedMod implements ModInitializer {
 
                             updateTimer();
                         } else {
-                            // Если выключен – сбрасываем tickDelta
-                            if (tickDeltaField != null) {
-                                try {
-                                    float current = tickDeltaField.getFloat(mc.timer);
-                                    if (current != 1.0f) tickDeltaField.setFloat(mc.timer, 1.0f);
-                                } catch (Exception ignored) {}
-                            }
+                            // Если выключен – сбрасываем tickDelta через рефлексию
+                            setTickDelta(1.0f);
                         }
                     }
 
@@ -96,15 +92,27 @@ public class SpeedMod implements ModInitializer {
     }
 
     private void resetTimer() {
-        try {
-            if (tickDeltaField != null) tickDeltaField.setFloat(mc.timer, 1.0f);
-        } catch (Exception ignored) {}
+        setTickDelta(1.0f);
         energy = 0.0f;
     }
 
-    private void updateTimer() {
-        if (mc.timer == null || tickDeltaField == null) return;
+    private void setTickDelta(float value) {
+        try {
+            if (timerField == null) return;
+            Object timer = timerField.get(mc);
+            if (timer == null) return;
+            // Получаем поле tickDelta из объекта timer
+            if (tickDeltaField == null) {
+                tickDeltaField = timer.getClass().getDeclaredField("tickDelta");
+                tickDeltaField.setAccessible(true);
+            }
+            tickDeltaField.setFloat(timer, value);
+        } catch (Exception e) {
+            LOGGER.error("Failed to set tickDelta", e);
+        }
+    }
 
+    private void updateTimer() {
         float target = 1.0f;
 
         switch (mode) {
@@ -125,10 +133,11 @@ public class SpeedMod implements ModInitializer {
                 }
                 break;
             case "Shift":
-                target = speedMultiplier; // упрощённо
+                target = speedMultiplier;
                 break;
             case "Grim":
-                boolean boostPressed = GLFW.glfwGetKey(mc.getWindow().getHandle(), GLFW.GLFW_KEY_LEFT_SHIFT) == GLFW.GLFW_PRESS;
+                long window = mc.getWindow().getHandle();
+                boolean boostPressed = GLFW.glfwGetKey(window, GLFW.GLFW_KEY_LEFT_SHIFT) == GLFW.GLFW_PRESS;
                 long now = System.currentTimeMillis();
                 if (boostPressed && (now - lastSetbackTime > 2000)) {
                     target = speedMultiplier;
@@ -141,11 +150,7 @@ public class SpeedMod implements ModInitializer {
                 target = 1.0f;
         }
 
-        try {
-            tickDeltaField.setFloat(mc.timer, target);
-        } catch (Exception e) {
-            LOGGER.error("Failed to set tickDelta", e);
-        }
+        setTickDelta(target);
     }
 
     private boolean isPlayerStill() {
