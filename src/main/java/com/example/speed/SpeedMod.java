@@ -20,7 +20,7 @@ import net.minecraft.network.packet.s2c.play.PlayerPositionLookS2CPacket;
 import net.minecraft.util.math.MathHelper;
 import org.lwjgl.glfw.GLFW;
 
-public class Timer extends Module {
+class Timer extends Module {
 
     private static final MinecraftClient mc = MinecraftClient.getInstance();
 
@@ -39,7 +39,7 @@ public class Timer extends Module {
     private static double prevPosX, prevPosY, prevPosZ;
     private static float yaw, pitch;
 
-    // Для дебаунса клавиш переключения режимов
+    // Дебаунс для Z X C V
     private boolean wasZ = false, wasX = false, wasC = false, wasV = false;
 
     public Timer() {
@@ -66,7 +66,7 @@ public class Timer extends Module {
     public void onUpdate(EventUpdate event) {
         if (mc.player == null || mc.world == null) return;
 
-        // === Переключение режимов по клавишам Z X C V ===
+        // === Переключение режимов по Z X C V ===
         long window = mc.getWindow().getHandle();
         boolean z = GLFW.glfwGetKey(window, GLFW.GLFW_KEY_Z) == GLFW.GLFW_PRESS;
         boolean x = GLFW.glfwGetKey(window, GLFW.GLFW_KEY_X) == GLFW.GLFW_PRESS;
@@ -97,7 +97,7 @@ public class Timer extends Module {
             wasV = true;
         } else if (!v) wasV = false;
 
-        // === Основная логика Timer ===
+        // === Основная логика ===
         if (mode.is("Matrix")) {
             energy = MathHelper.clamp(notMoving() ? energy + 0.025f : energy - (oldMatrix.getValue() ? 0.005f : 0.0f), 0.0f, 1.0f);
         }
