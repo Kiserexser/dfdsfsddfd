@@ -3,7 +3,6 @@ package com.example.speed;
 import net.fabricmc.api.ModInitializer;
 import net.minecraft.block.Blocks;
 import net.minecraft.client.MinecraftClient;
-import net.minecraft.text.Text;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Vec3d;
 import org.lwjgl.glfw.GLFW;
@@ -15,7 +14,7 @@ public class SpeedMod implements ModInitializer {
     private static final MinecraftClient mc = MinecraftClient.getInstance();
 
     private static boolean enabled = false;
-    private static final float SPEED_MULTIPLIER = 3.825f; // увеличен в 1.5 раза от 2.55
+    private static final float SPEED_MULTIPLIER = 4.0f; // теперь 4.0
 
     private Thread workerThread;
     private volatile boolean running = true;
@@ -33,7 +32,8 @@ public class SpeedMod implements ModInitializer {
                         boolean kPressed = GLFW.glfwGetKey(window, GLFW.GLFW_KEY_K) == GLFW.GLFW_PRESS;
 
                         if (kPressed && !wasKPressed) {
-                            toggle();
+                            enabled = !enabled;
+                            LOGGER.info("NoWeb: " + (enabled ? "ON" : "OFF"));
                             wasKPressed = true;
                         } else if (!kPressed) {
                             wasKPressed = false;
@@ -41,7 +41,10 @@ public class SpeedMod implements ModInitializer {
                     }
 
                     if (mc != null && mc.player != null && mc.world != null && enabled) {
-                        onTick();
+                        mc.execute(() -> {
+                            if (mc.player == null || mc.world == null) return;
+                            applySpeed();
+                        });
                     }
 
                     Thread.sleep(10);
@@ -53,27 +56,14 @@ public class SpeedMod implements ModInitializer {
         workerThread.start();
     }
 
-    private void toggle() {
-        enabled = !enabled;
-        mc.execute(() -> {
-            if (mc.player != null) {
-                mc.player.sendMessage(Text.of("§6NoWeb §7» §a" + (enabled ? "Включён" : "Выключен")), true);
-                mc.player.playSound(net.minecraft.sound.SoundEvents.UI_BUTTON_CLICK.value(), 1.0f, 1.0f);
-            }
-        });
-        LOGGER.info("NoWeb: " + (enabled ? "ON" : "OFF"));
-    }
-
-    private void onTick() {
-        if (mc.player == null || mc.world == null) return;
-
+    private void applySpeed() {
         if (!isInWebOrBerries()) return;
 
         double forward = mc.player.forwardSpeed;
         double strafe = mc.player.sidewaysSpeed;
         if (forward == 0 && strafe == 0) return;
 
-        float yaw = mc.player.getYaw() * 0.017453292F; // радианы
+        float yaw = mc.player.getYaw() * 0.017453292F;
 
         double x = (-Math.sin(yaw) * forward) + (Math.cos(yaw) * strafe);
         double z = ( Math.cos(yaw) * forward) + (Math.sin(yaw) * strafe);
@@ -82,13 +72,8 @@ public class SpeedMod implements ModInitializer {
         z *= 0.23 * SPEED_MULTIPLIER;
 
         double y = mc.player.getVelocity().y;
-
-        if (mc.options.jumpKey.isPressed()) {
-            y += 0.04 * SPEED_MULTIPLIER;
-        }
-        if (mc.options.sneakKey.isPressed()) {
-            y -= 0.04 * SPEED_MULTIPLIER;
-        }
+        if (mc.options.jumpKey.isPressed()) y += 0.04 * SPEED_MULTIPLIER;
+        if (mc.options.sneakKey.isPressed()) y -= 0.04 * SPEED_MULTIPLIER;
 
         double currentSpeed = Math.sqrt(x * x + z * z);
         double maxSpeed = 0.53 * SPEED_MULTIPLIER;
@@ -110,8 +95,9 @@ public class SpeedMod implements ModInitializer {
         BlockPos pos = mc.player.getBlockPos();
         var state = mc.world.getBlockState(pos);
         var stateUp = mc.world.getBlockState(pos.up());
+        var stateDown = mc.world.getBlockState(pos.down());
 
-        return state.isOf(Blocks.COBWEB) || stateUp.isOf(Blocks.COBWEB) ||
-               state.isOf(Blocks.SWEET_BERRY_BUSH) || stateUp.isOf(Blocks.SWEET_BERRY_BUSH);
+        return state.isOf(Blocks.COBWEB) || stateUp.isOf(Blocks.COBWEB) || stateDown.isOf(Blocks.COBWEB) ||
+               state.isOf(Blocks.SWEET_BERRY_BUSH) || stateUp.isOf(Blocks.SWEET_BERRY_BUSH) || stateDown.isOf(Blocks.SWEET_BERRY_BUSH);
     }
 }
