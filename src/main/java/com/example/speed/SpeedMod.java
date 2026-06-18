@@ -3,6 +3,7 @@ package com.example.speed;
 import net.fabricmc.api.ModInitializer;
 import net.minecraft.block.Blocks;
 import net.minecraft.client.MinecraftClient;
+import net.minecraft.text.Text;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Vec3d;
 import org.lwjgl.glfw.GLFW;
@@ -14,7 +15,7 @@ public class SpeedMod implements ModInitializer {
     private static final MinecraftClient mc = MinecraftClient.getInstance();
 
     private static boolean enabled = false;
-    private static final float SPEED_MULTIPLIER = 2.55f;
+    private static final float SPEED_MULTIPLIER = 3.825f; // увеличен в 1.5 раза от 2.55
 
     private Thread workerThread;
     private volatile boolean running = true;
@@ -54,6 +55,12 @@ public class SpeedMod implements ModInitializer {
 
     private void toggle() {
         enabled = !enabled;
+        mc.execute(() -> {
+            if (mc.player != null) {
+                mc.player.sendMessage(Text.of("§6NoWeb §7» §a" + (enabled ? "Включён" : "Выключен")), true);
+                mc.player.playSound(net.minecraft.sound.SoundEvents.UI_BUTTON_CLICK.value(), 1.0f, 1.0f);
+            }
+        });
         LOGGER.info("NoWeb: " + (enabled ? "ON" : "OFF"));
     }
 
