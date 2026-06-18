@@ -5,7 +5,7 @@ import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.gui.widget.ButtonWidget;
-import net.minecraft.client.gui.widget.SliderWidget;
+import net.minecraft.client.gui.widget.TextWidget;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.sound.SoundEvents;
 import net.minecraft.text.Text;
@@ -187,20 +187,21 @@ public class SpeedMod implements ModInitializer {
         return from + step;
     }
 
-    // =================== GUI (нежный стиль сакура) ===================
+    // =================== GUI с кнопками +/− ===================
     private static class SettingsGUI extends Screen {
         private static final int WIDTH = 230;
-        private static final int HEIGHT = 290;
+        private static final int HEIGHT = 300;
         private int x, y;
 
         private ButtonWidget toggleButton;
-        private SliderWidget rangeSlider;
-        private SliderWidget minDelaySlider;
-        private SliderWidget maxDelaySlider;
-        private SliderWidget jitterSlider;
-        private SliderWidget shiftSlider;
-        private ButtonWidget sprintToggle;
-        private ButtonWidget shiftToggle;
+        private TextWidget rangeText, minDelayText, maxDelayText, jitterText, shiftText;
+        private ButtonWidget rangeDec, rangeInc;
+        private ButtonWidget minDelayDec, minDelayInc;
+        private ButtonWidget maxDelayDec, maxDelayInc;
+        private ButtonWidget jitterDec, jitterInc;
+        private ButtonWidget shiftDec, shiftInc;
+        private ButtonWidget sprintToggle, shiftToggle;
+        private ButtonWidget closeButton;
 
         protected SettingsGUI() {
             super(Text.literal("SpeedMod Settings"));
@@ -212,131 +213,127 @@ public class SpeedMod implements ModInitializer {
             this.x = (this.width - WIDTH) / 2;
             this.y = (this.height - HEIGHT) / 2;
 
-            // === Кнопка On/Off ===
+            // === On/Off ===
             toggleButton = ButtonWidget.builder(
                     Text.literal(ENABLED ? "§aON" : "§cOFF"),
                     btn -> {
                         ENABLED = !ENABLED;
                         toggleButton.setMessage(Text.literal(ENABLED ? "§aON" : "§cOFF"));
-                        if (client != null && client.player != null) {
+                        if (client != null && client.player != null)
                             client.player.playSound(SoundEvents.UI_BUTTON_CLICK.value(), 1.0f, 1.0f);
-                        }
                     }
             ).dimensions(x + 10, y + 25, 60, 20).build();
             this.addDrawableChild(toggleButton);
 
             // === Радиус ===
-            rangeSlider = new SliderWidget(x + 10, y + 55, 200, 20, Text.literal("Радиус: " + RANGE), RANGE) {
-                @Override
-                protected void updateMessage() {
-                    this.setMessage(Text.literal("Радиус: " + String.format("%.1f", value)));
-                }
-                @Override
-                protected void applyValue() {
-                    RANGE = value;
-                }
-                @Override
-                public double getMinValue() { return 1.0; }
-                @Override
-                public double getMaxValue() { return 8.0; }
-            };
-            this.addDrawableChild(rangeSlider);
+            rangeText = new TextWidget(x + 10, y + 55, 80, 20, Text.literal("Радиус: " + String.format("%.1f", RANGE)), textRenderer);
+            rangeText.setColor(0xFF69B4);
+            this.addDrawableChild(rangeText);
+
+            rangeDec = ButtonWidget.builder(Text.literal("-"), btn -> {
+                RANGE = Math.max(1.0, RANGE - 0.1);
+                rangeText.setMessage(Text.literal("Радиус: " + String.format("%.1f", RANGE)));
+            }).dimensions(x + 100, y + 55, 20, 20).build();
+            this.addDrawableChild(rangeDec);
+
+            rangeInc = ButtonWidget.builder(Text.literal("+"), btn -> {
+                RANGE = Math.min(8.0, RANGE + 0.1);
+                rangeText.setMessage(Text.literal("Радиус: " + String.format("%.1f", RANGE)));
+            }).dimensions(x + 130, y + 55, 20, 20).build();
+            this.addDrawableChild(rangeInc);
 
             // === Мин. задержка ===
-            minDelaySlider = new SliderWidget(x + 10, y + 80, 200, 20, Text.literal("Мин. задержка: " + MIN_DELAY), MIN_DELAY) {
-                @Override
-                protected void updateMessage() {
-                    this.setMessage(Text.literal("Мин. задержка: " + String.format("%.3f", value)));
-                }
-                @Override
-                protected void applyValue() {
-                    MIN_DELAY = value;
-                    if (MIN_DELAY > MAX_DELAY) MAX_DELAY = MIN_DELAY;
-                }
-                @Override
-                public double getMinValue() { return 0.1; }
-                @Override
-                public double getMaxValue() { return 1.0; }
-            };
-            this.addDrawableChild(minDelaySlider);
+            minDelayText = new TextWidget(x + 10, y + 80, 120, 20, Text.literal("Мин. задержка: " + String.format("%.3f", MIN_DELAY)), textRenderer);
+            minDelayText.setColor(0xFF69B4);
+            this.addDrawableChild(minDelayText);
+
+            minDelayDec = ButtonWidget.builder(Text.literal("-"), btn -> {
+                MIN_DELAY = Math.max(0.1, MIN_DELAY - 0.005);
+                if (MIN_DELAY > MAX_DELAY) MAX_DELAY = MIN_DELAY;
+                minDelayText.setMessage(Text.literal("Мин. задержка: " + String.format("%.3f", MIN_DELAY)));
+            }).dimensions(x + 140, y + 80, 20, 20).build();
+            this.addDrawableChild(minDelayDec);
+
+            minDelayInc = ButtonWidget.builder(Text.literal("+"), btn -> {
+                MIN_DELAY = Math.min(MAX_DELAY, MIN_DELAY + 0.005);
+                minDelayText.setMessage(Text.literal("Мин. задержка: " + String.format("%.3f", MIN_DELAY)));
+            }).dimensions(x + 170, y + 80, 20, 20).build();
+            this.addDrawableChild(minDelayInc);
 
             // === Макс. задержка ===
-            maxDelaySlider = new SliderWidget(x + 10, y + 105, 200, 20, Text.literal("Макс. задержка: " + MAX_DELAY), MAX_DELAY) {
-                @Override
-                protected void updateMessage() {
-                    this.setMessage(Text.literal("Макс. задержка: " + String.format("%.3f", value)));
-                }
-                @Override
-                protected void applyValue() {
-                    MAX_DELAY = value;
-                    if (MAX_DELAY < MIN_DELAY) MIN_DELAY = MAX_DELAY;
-                }
-                @Override
-                public double getMinValue() { return 0.1; }
-                @Override
-                public double getMaxValue() { return 1.0; }
-            };
-            this.addDrawableChild(maxDelaySlider);
+            maxDelayText = new TextWidget(x + 10, y + 105, 120, 20, Text.literal("Макс. задержка: " + String.format("%.3f", MAX_DELAY)), textRenderer);
+            maxDelayText.setColor(0xFF69B4);
+            this.addDrawableChild(maxDelayText);
+
+            maxDelayDec = ButtonWidget.builder(Text.literal("-"), btn -> {
+                MAX_DELAY = Math.max(MIN_DELAY, MAX_DELAY - 0.005);
+                maxDelayText.setMessage(Text.literal("Макс. задержка: " + String.format("%.3f", MAX_DELAY)));
+            }).dimensions(x + 140, y + 105, 20, 20).build();
+            this.addDrawableChild(maxDelayDec);
+
+            maxDelayInc = ButtonWidget.builder(Text.literal("+"), btn -> {
+                MAX_DELAY = Math.min(1.0, MAX_DELAY + 0.005);
+                maxDelayText.setMessage(Text.literal("Макс. задержка: " + String.format("%.3f", MAX_DELAY)));
+            }).dimensions(x + 170, y + 105, 20, 20).build();
+            this.addDrawableChild(maxDelayInc);
 
             // === Джиттер ===
-            jitterSlider = new SliderWidget(x + 10, y + 130, 200, 20, Text.literal("Джиттер: " + JITTER_RANGE), JITTER_RANGE) {
-                @Override
-                protected void updateMessage() {
-                    this.setMessage(Text.literal("Джиттер: " + String.format("%.2f", value)));
-                }
-                @Override
-                protected void applyValue() {
-                    JITTER_RANGE = (float) value;
-                }
-                @Override
-                public double getMinValue() { return 0.0; }
-                @Override
-                public double getMaxValue() { return 1.0; }
-            };
-            this.addDrawableChild(jitterSlider);
+            jitterText = new TextWidget(x + 10, y + 130, 100, 20, Text.literal("Джиттер: " + String.format("%.2f", JITTER_RANGE)), textRenderer);
+            jitterText.setColor(0xFF69B4);
+            this.addDrawableChild(jitterText);
+
+            jitterDec = ButtonWidget.builder(Text.literal("-"), btn -> {
+                JITTER_RANGE = Math.max(0.0f, JITTER_RANGE - 0.01f);
+                jitterText.setMessage(Text.literal("Джиттер: " + String.format("%.2f", JITTER_RANGE)));
+            }).dimensions(x + 120, y + 130, 20, 20).build();
+            this.addDrawableChild(jitterDec);
+
+            jitterInc = ButtonWidget.builder(Text.literal("+"), btn -> {
+                JITTER_RANGE = Math.min(1.0f, JITTER_RANGE + 0.01f);
+                jitterText.setMessage(Text.literal("Джиттер: " + String.format("%.2f", JITTER_RANGE)));
+            }).dimensions(x + 150, y + 130, 20, 20).build();
+            this.addDrawableChild(jitterInc);
 
             // === Смещение ===
-            shiftSlider = new SliderWidget(x + 10, y + 155, 200, 20, Text.literal("Смещение: " + SHIFT_DEGREES + "°"), SHIFT_DEGREES) {
-                @Override
-                protected void updateMessage() {
-                    this.setMessage(Text.literal("Смещение: " + String.format("%.2f", value) + "°"));
-                }
-                @Override
-                protected void applyValue() {
-                    SHIFT_DEGREES = (float) value;
-                }
-                @Override
-                public double getMinValue() { return 0.0; }
-                @Override
-                public double getMaxValue() { return 1.0; }
-            };
-            this.addDrawableChild(shiftSlider);
+            shiftText = new TextWidget(x + 10, y + 155, 100, 20, Text.literal("Смещение: " + String.format("%.2f", SHIFT_DEGREES) + "°"), textRenderer);
+            shiftText.setColor(0xFF69B4);
+            this.addDrawableChild(shiftText);
 
-            // === Сброс спринта (кнопка-переключатель) ===
+            shiftDec = ButtonWidget.builder(Text.literal("-"), btn -> {
+                SHIFT_DEGREES = Math.max(0.0f, SHIFT_DEGREES - 0.05f);
+                shiftText.setMessage(Text.literal("Смещение: " + String.format("%.2f", SHIFT_DEGREES) + "°"));
+            }).dimensions(x + 120, y + 155, 20, 20).build();
+            this.addDrawableChild(shiftDec);
+
+            shiftInc = ButtonWidget.builder(Text.literal("+"), btn -> {
+                SHIFT_DEGREES = Math.min(1.0f, SHIFT_DEGREES + 0.05f);
+                shiftText.setMessage(Text.literal("Смещение: " + String.format("%.2f", SHIFT_DEGREES) + "°"));
+            }).dimensions(x + 150, y + 155, 20, 20).build();
+            this.addDrawableChild(shiftInc);
+
+            // === Сброс спринта ===
             sprintToggle = ButtonWidget.builder(
                     Text.literal(SPRINT_RESET ? "§aСброс спринта Вкл" : "§cСброс спринта Выкл"),
                     btn -> {
                         SPRINT_RESET = !SPRINT_RESET;
                         sprintToggle.setMessage(Text.literal(SPRINT_RESET ? "§aСброс спринта Вкл" : "§cСброс спринта Выкл"));
                     }
-            ).dimensions(x + 10, y + 180, 140, 20).build();
+            ).dimensions(x + 10, y + 185, 140, 20).build();
             this.addDrawableChild(sprintToggle);
 
-            // === Смещение вкл/выкл (кнопка-переключатель) ===
+            // === Смещение вкл/выкл ===
             shiftToggle = ButtonWidget.builder(
                     Text.literal(ENABLE_SHIFT ? "§aСмещение Вкл" : "§cСмещение Выкл"),
                     btn -> {
                         ENABLE_SHIFT = !ENABLE_SHIFT;
                         shiftToggle.setMessage(Text.literal(ENABLE_SHIFT ? "§aСмещение Вкл" : "§cСмещение Выкл"));
                     }
-            ).dimensions(x + 10, y + 205, 140, 20).build();
+            ).dimensions(x + 10, y + 210, 140, 20).build();
             this.addDrawableChild(shiftToggle);
 
-            // === Кнопка "Закрыть" ===
-            ButtonWidget closeButton = ButtonWidget.builder(
-                    Text.literal("Закрыть"),
-                    btn -> this.close()
-            ).dimensions(x + 80, y + HEIGHT - 30, 70, 20).build();
+            // === Закрыть ===
+            closeButton = ButtonWidget.builder(Text.literal("Закрыть"), btn -> this.close())
+                    .dimensions(x + 80, y + HEIGHT - 30, 70, 20).build();
             this.addDrawableChild(closeButton);
         }
 
@@ -347,7 +344,6 @@ public class SpeedMod implements ModInitializer {
             int textColor = 0xFF69B4;
 
             context.fill(x, y, x + WIDTH, y + HEIGHT, bgColor);
-            // Рамка
             context.fill(x, y, x + WIDTH, y + 1, borderColor);
             context.fill(x, y + HEIGHT - 1, x + WIDTH, y + HEIGHT, borderColor);
             context.fill(x, y, x + 1, y + HEIGHT, borderColor);
