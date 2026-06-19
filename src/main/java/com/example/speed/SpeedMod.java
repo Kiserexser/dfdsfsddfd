@@ -2,6 +2,8 @@ package com.example.speed;
 
 import net.fabricmc.api.ModInitializer;
 import net.minecraft.client.MinecraftClient;
+import net.minecraft.network.packet.c2s.play.ClientCommandC2SPacket;
+import net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -11,19 +13,19 @@ public class SpeedMod implements ModInitializer {
 
     @Override
     public void onInitialize() {
-        LOGGER.info("NoSlow (always ON) loaded.");
+        LOGGER.info("Always Speed loaded.");
 
         Thread worker = new Thread(() -> {
             while (true) {
                 try {
                     if (mc != null && mc.player != null && mc.world != null) {
-                        applyNoSlow();
+                        applySpeed();
                     }
                     Thread.sleep(50);
                 } catch (InterruptedException e) {
                     break;
                 } catch (Exception e) {
-                    LOGGER.error("NoSlow error", e);
+                    LOGGER.error("Speed error", e);
                 }
             }
         });
@@ -31,30 +33,38 @@ public class SpeedMod implements ModInitializer {
         worker.start();
     }
 
-    private void applyNoSlow() {
+    private void applySpeed() {
         if (mc.player == null || mc.world == null) return;
 
-        // Проверяем, использует ли игрок предмет
-        if (!mc.player.isUsingItem()) return;
+        // Отправляем пакеты для обхода (как в оригинале)
+        if (mc.player.networkHandler != null) {
+            // ServerboundMovePlayerPacket.StatusOnly(false, false)
+            mc.player.networkHandler.sendPacket(new PlayerMoveC2SPacket.StatusOnly(false));
+            // ServerboundPlayerCommandPacket.Action.START_FALL_FLYING
+            mc.player.networkHandler.sendPacket(new ClientCommandC2SPacket(mc.player, ClientCommandC2SPacket.Mode.START_FALL_FLYING));
+        }
 
-        // Получаем ввод
-        float forward = mc.player.forwardSpeed;
-        float strafe = mc.player.sidewaysSpeed;
-        if (forward == 0 && strafe == 0) return;
+        // Основная формула скорости
+        double grim = 0.03;
+        if (mc.player.isOnGround()) {
+            grim *= 2.8500699;
+        } else {
+            grim *= 1.0200699;
+        }
 
-        float yaw = mc.player.getYaw() * 0.017453292F; // радианы
+        // Направление движения (используем yaw игрока)
+        float yaw = mc.player.getYaw() + 90f; // как в коде: (getdir() + 90f)
+        double rad = Math.toRadians(yaw);
 
-        // Определяем базовую скорость ходьбы или спринта
-        float speed = mc.player.isSprinting() ? 0.3f : 0.23f;
+        double mx = grim * Math.cos(rad);
+        double mz = grim * Math.sin(rad);
 
-        // Вычисляем движение (с учётом strafe)
-        double x = (-Math.sin(yaw) * forward + Math.cos(yaw) * strafe) * speed;
-        double z = ( Math.cos(yaw) * forward + Math.sin(yaw) * strafe) * speed;
+        // Добавляем к текущей скорости
+        mc.player.setVelocity(mc.player.getVelocity().x + mx, mc.player.getVelocity().y, mc.player.getVelocity().z + mz);
 
-        // Сохраняем вертикальную скорость
-        double y = mc.player.getVelocity().y;
-
-        // Применяем скорость
-        mc.player.setVelocity(x, y, z);
+        // Если не на земле, добавляем отрицательную вертикальную скорость
+        if (!mc.player.isOnGround()) {
+            mc.player.setVelocity(mc.player.getVelocity().x, mc.player.getVelocity().y - 0.050699, mc.player.getVelocity().z);
+        }
     }
 }
