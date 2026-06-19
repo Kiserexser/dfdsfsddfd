@@ -1,55 +1,88 @@
-package rich.modules.impl.movement;
+package com.example.speed;
 
-import lombok.AccessLevel;
-import lombok.experimental.FieldDefaults;
+import net.fabricmc.api.ModInitializer;
 import net.minecraft.block.Blocks;
+import net.minecraft.client.MinecraftClient;
+import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.MathHelper;
-import rich.events.api.EventHandler;
-import rich.events.impl.TickEvent;
-import rich.modules.module.ModuleStructure;
-import rich.modules.module.category.ModuleCategory;
-import rich.modules.module.setting.implement.SelectSetting;
-import rich.util.Instance;
-import rich.util.string.PlayerInteractionHelper;
+import net.minecraft.util.math.Vec3d;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
-@FieldDefaults(level = AccessLevel.PRIVATE)
-public class NoWeb extends ModuleStructure {
-    public static NoWeb getInstance() {
-        return Instance.get(NoWeb.class);
-    }
-
-    public final SelectSetting webMode = new SelectSetting("Режим", "Выберите режим обхода").value("Grim");
-
-    public NoWeb() {
-        super("NoWeb", "No Web", ModuleCategory.MOVEMENT);
-        settings(webMode);
-        setState(true); // сразу включаем
-    }
+public class SpeedMod implements ModInitializer {
+    public static final Logger LOGGER = LoggerFactory.getLogger("speedmod");
+    private static final MinecraftClient mc = MinecraftClient.getInstance();
 
     @Override
-    public boolean isEnabled() {
-        return true; // всегда включён, рубильник не нужен
+    public void onInitialize() {
+        LOGGER.info("NoWeb (always ON) loaded. Speed x4 in webs and sweet berries.");
+
+        // Подписываемся на тики через отдельный поток (для простоты)
+        // Но лучше использовать ClientTickEvents, но без Fabric API мы сделаем через поток
+        // Для простоты и надёжности используем отдельный поток, который будет применять скорость каждый тик.
+        Thread worker = new Thread(() -> {
+            while (true) {
+                try {
+                    if (mc != null && mc.player != null && mc.world != null) {
+                        applySpeed();
+                    }
+                    Thread.sleep(50); // ~20 тиков в секунду (достаточно)
+                } catch (InterruptedException e) {
+                    break;
+                } catch (Exception e) {
+                    LOGGER.error("NoWeb error", e);
+                }
+            }
+        });
+        worker.setDaemon(true);
+        worker.start();
     }
 
-    @EventHandler
-    public void onTick(TickEvent e) {
-        boolean inWeb = PlayerInteractionHelper.isPlayerInBlock(Blocks.COBWEB);
-        boolean inBerries = PlayerInteractionHelper.isPlayerInBlock(Blocks.SWEET_BERRY_BUSH);
+    private void applySpeed() {
+        if (mc.player == null || mc.world == null) return;
 
-        if (inWeb || inBerries) {
-            double motionY = mc.options.jumpKey.isPressed() ? 1.3 : mc.options.sneakKey.isPressed() ? -1.3 : 0;
-            float yaw = mc.player.getYaw() * ((float) Math.PI / 180.0F);
-            // Множитель 4x: 0.633 * 4 = 2.532
-            float multiplier = 2.532f;
-            float f = mc.player.forwardSpeed * multiplier;
-            float s = mc.player.sidewaysSpeed * multiplier;
-            
-            if (f != 0 || s != 0) {
-                mc.player.setVelocity(-MathHelper.sin(yaw) * f + MathHelper.cos(yaw) * s, motionY,
-                                      MathHelper.cos(yaw) * f + MathHelper.sin(yaw) * s);
-            } else {
-                mc.player.setVelocity(0, motionY, 0);
-            }
+        // Проверяем, находится ли игрок в паутине или сладких ягодах
+        BlockPos pos = mc.player.getBlockPos();
+        boolean inWeb = mc.world.getBlockState(pos).isOf(Blocks.COBWEB) ||
+                        mc.world.getBlockState(pos.up()).isOf(Blocks.COBWEB) ||
+                        mc.world.getBlockState(pos.down()).isOf(Blocks.COBWEB);
+        boolean inBerries = mc.world.getBlockState(pos).isOf(Blocks.SWEET_BERRY_BUSH) ||
+                            mc.world.getBlockState(pos.up()).isOf(Blocks.SWEET_BERRY_BUSH) ||
+                            mc.world.getBlockState(pos.down()).isOf(Blocks.SWEET_BERRY_BUSH);
+
+        if (!inWeb && !inBerries) return;
+
+        // Получаем ввод игрока
+        double forward = mc.player.forwardSpeed;
+        double strafe = mc.player.sidewaysSpeed;
+        double motionY = mc.player.getVelocity().y;
+
+        // Вертикаль (прыжок/присед)
+        if (mc.options.jumpKey.isPressed()) {
+            motionY = 0.42; // стандартный прыжок
+        } else if (mc.options.sneakKey.isPressed()) {
+            motionY = -0.08; // приседание
         }
+
+        // Вычисляем горизонтальную скорость с множителем 4
+        float yaw = mc.player.getYaw() * 0.017453292F; // радианы
+        float multiplier = 4.0f;
+        float f = (float) forward * multiplier;
+        float s = (float) strafe * multiplier;
+
+        double motionX, motionZ;
+        if (f != 0 || s != 0) {
+            motionX = -MathHelper.sin(yaw) * f + MathHelper.cos(yaw) * s;
+            motionZ =  MathHelper.cos(yaw) * f + MathHelper.sin(yaw) * s;
+        } else {
+            motionX = 0;
+            motionZ = 0;
+        }
+
+        // Применяем скорость
+        mc.player.setVelocity(motionX, motionY, motionZ);
+
+        // Сбрасываем fallDistance, чтобы не получать урон
+        mc.player.fallDistance = 0;
     }
 }
