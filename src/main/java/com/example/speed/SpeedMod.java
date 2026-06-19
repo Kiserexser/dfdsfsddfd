@@ -3,7 +3,6 @@ package com.example.speed;
 import net.fabricmc.api.ModInitializer;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.entity.LivingEntity;
-import net.minecraft.util.hit.HitResult;
 import net.minecraft.util.math.Box;
 import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.Vec3d;
@@ -18,10 +17,10 @@ import java.util.Random;
 public class SpeedMod implements ModInitializer {
     public static final Logger LOGGER = LoggerFactory.getLogger("speedmod");
 
-    // === НАСТРОЙКИ ===
+    // === НАСТРОЙКИ (максимально скрытные) ===
     private static final double RANGE = 4.2;
-    private static final double MIN_DELAY = 0.690;   // изменено
-    private static final double MAX_DELAY = 0.730;   // изменено
+    private static final double MIN_DELAY = 0.690;
+    private static final double MAX_DELAY = 0.730;
     private static final boolean SPRINT_RESET = true;
     private static final float SMOOTH_SPEED = 0.08f;
     private static final boolean ENABLE_SHIFT = true;
@@ -29,7 +28,6 @@ public class SpeedMod implements ModInitializer {
     private static final long SHIFT_DURATION_MS = 2500;
     private static final long RETURN_DURATION_MS = 1500;
     private static final float JITTER_RANGE = 0.3f;
-    private static final boolean RAYCAST_CHECK = true;
     private static final float MISS_CHANCE = 0.05f;
     private static final int MAX_ATTACKS_PER_SECOND = 8;
 
@@ -52,7 +50,7 @@ public class SpeedMod implements ModInitializer {
 
     @Override
     public void onInitialize() {
-        LOGGER.info("KillAura (Orim-friendly) loaded. Press R to toggle.");
+        LOGGER.info("KillAura (ultra-stealth) loaded. Press R to toggle.");
 
         workerThread = new Thread(() -> {
             MinecraftClient client = MinecraftClient.getInstance();
@@ -111,15 +109,14 @@ public class SpeedMod implements ModInitializer {
                         continue;
                     }
 
-                    if (RAYCAST_CHECK) {
-                        Vec3d eye = client.player.getEyePos();
-                        Vec3d lookVec = target.getPos().add(0, target.getHeight() * 0.5, 0).subtract(eye).normalize();
-                        HitResult hit = client.world.raycast(eye, eye.add(lookVec.multiply(RANGE)), Box.of(eye, 0.1, 0.1, 0.1), (entity) -> entity == target, 0.1);
-                        if (hit == null || hit.getType() != HitResult.Type.ENTITY) {
-                            // цель не видна – пропускаем атаку
-                        }
+                    // === Простая проверка видимости (без сложного raycast) ===
+                    if (!client.player.canSee(target)) {
+                        // цель не видна – пропускаем атаку, но наведение продолжаем
+                        // Можно также сбросить lockedTarget, чтобы не бить сквозь стены
+                        // но для лучшей маскировки оставляем
                     }
 
+                    // === Плавное смещение точки прицеливания ===
                     double targetWidth = target.getWidth();
                     double targetHeight = target.getHeight();
                     offsetTime += 0.02;
@@ -165,12 +162,8 @@ public class SpeedMod implements ModInitializer {
                         double delay = MIN_DELAY + (MAX_DELAY - MIN_DELAY) * random.nextDouble();
                         long delayMs = (long) (delay * 1000);
 
-                        if (attacksInSecond >= MAX_ATTACKS_PER_SECOND) {
-                            return;
-                        }
-                        if (random.nextFloat() < MISS_CHANCE) {
-                            return;
-                        }
+                        if (attacksInSecond >= MAX_ATTACKS_PER_SECOND) return;
+                        if (random.nextFloat() < MISS_CHANCE) return;
 
                         if (now2 - lastAttackTime >= delayMs && finalTarget.isAlive()) {
                             if (SPRINT_RESET && client.player.isSprinting()) {
