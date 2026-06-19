@@ -1,242 +1,183 @@
 package com.example.speed;
 
-import dev.relictdlc.event.EventTarget;
-import dev.relictdlc.event.events.EventPacket;
-import dev.relictdlc.event.events.EventUpdate;
-import dev.relictdlc.event.events.EventPostPlayerUpdate;
-import dev.relictdlc.module.Module;
-import dev.relictdlc.module.ModuleCategory;
-import dev.relictdlc.setting.BooleanSetting;
-import dev.relictdlc.setting.ModeSetting;
-import dev.relictdlc.setting.NumberSetting;
-import dev.relictdlc.setting.KeySetting;
-import dev.relictdlc.util.ChatUtil;
-import dev.relictdlc.util.MovementUtility;
+import net.fabricmc.api.ModInitializer;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.gui.widget.ButtonWidget;
-import net.minecraft.client.util.InputUtil;
-import net.minecraft.network.packet.s2c.common.CommonPingS2CPacket;
-import net.minecraft.network.packet.s2c.play.EntityVelocityUpdateS2CPacket;
-import net.minecraft.network.packet.s2c.play.PlayerPositionLookS2CPacket;
 import net.minecraft.text.Text;
-import net.minecraft.util.math.MathHelper;
 import org.lwjgl.glfw.GLFW;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
-public class SpeedMod extends Module {
+import java.lang.reflect.Field;
 
+public class SpeedMod implements ModInitializer {
+    public static final Logger LOGGER = LoggerFactory.getLogger("speedmod");
     private static final MinecraftClient mc = MinecraftClient.getInstance();
 
-    public final ModeSetting mode = addSetting(new ModeSetting("Режим", "Режим работы таймера", "Normal", "Normal", "Matrix", "Shift", "Grim"));
-    public final BooleanSetting oldMatrix = addSetting(new BooleanSetting("Старый Matrix", "Старый обход для Matrix", false));
-    public final NumberSetting speed = addSetting(new NumberSetting("Скорость", "Множитель таймера", 2.0, 0.1, 10.0, 0.1));
-    public final NumberSetting shiftTicks = addSetting(new NumberSetting("Тики сдвига", "Количество тиков для сдвига (Shift)", 10.0, 1.0, 40.0, 1.0));
-    public final KeySetting boostKey = addSetting(new KeySetting("Кнопка Grim", "Клавиша для ускорения в Grim", GLFW.GLFW_KEY_UNKNOWN));
-    public final ModeSetting onFlag = addSetting(new ModeSetting("При флаге", "Действие при флаге античита", "Reset", "Reset", "Disable", "None"));
+    private static boolean enabled = false;
+    private static String currentMode = "Normal"; // Normal, Matrix, Shift, Grim
+    private static float speedMultiplier = 2.0f;
+    private static float energy = 0.0f;
+    private static long lastSetbackTime = 0;
+    private static float normalTickDelta = 1.0f;
 
-    private double tickTimer = 1.0;
-    private float energy = 0.0f;
-    private long cancelTime = 0;
-    private long lastSetbackTime = 0;
-
-    private static double prevPosX, prevPosY, prevPosZ;
-    private static float yaw, pitch;
-
-    // Дебаунс для Z X C
+    // Для дебаунса клавиш
     private boolean wasZ = false, wasX = false, wasC = false;
     private boolean wasRightShift = false;
 
-    public SpeedMod() {
-        super("Timer", "Ускоряет время в игре", ModuleCategory.PLAYER, GLFW.GLFW_KEY_UNKNOWN);
+    private Thread workerThread;
+    private volatile boolean running = true;
+
+    private static Field timerField;
+    private static Field tickDeltaField;
+
+    static {
+        try {
+            timerField = MinecraftClient.class.getDeclaredField("timer");
+            timerField.setAccessible(true);
+        } catch (Exception e) {
+            LOGGER.error("Could not find timer field", e);
+        }
     }
 
     @Override
-    protected void onEnable() {
-        tickTimer = 1.0;
-        if (!mode.is("Matrix")) {
-            energy = 0.0f;
-        }
-        if (mode.is("Grim")) {
-            cancelTime = System.currentTimeMillis();
+    public void onInitialize() {
+        LOGGER.info("Timer loaded. RightShift=GUI, Z=Normal, X=Matrix, C=Shift");
+
+        workerThread = new Thread(() -> {
+            while (running) {
+                try {
+                    if (mc != null && mc.getWindow() != null) {
+                        long window = mc.getWindow().getHandle();
+
+                        // === Проверка правого Shift ===
+                        boolean rightShiftPressed = GLFW.glfwGetKey(window, GLFW.GLFW_KEY_RIGHT_SHIFT) == GLFW.GLFW_PRESS;
+                        if (rightShiftPressed && !wasRightShift) {
+                            mc.execute(() -> mc.setScreen(new TimerGUI()));
+                            wasRightShift = true;
+                        } else if (!rightShiftPressed) {
+                            wasRightShift = false;
+                        }
+
+                        // === Z X C (только если мод включён) ===
+                        boolean zPressed = GLFW.glfwGetKey(window, GLFW.GLFW_KEY_Z) == GLFW.GLFW_PRESS;
+                        boolean xPressed = GLFW.glfwGetKey(window, GLFW.GLFW_KEY_X) == GLFW.GLFW_PRESS;
+                        boolean cPressed = GLFW.glfwGetKey(window, GLFW.GLFW_KEY_C) == GLFW.GLFW_PRESS;
+
+                        if (zPressed && !wasZ) {
+                            currentMode = "Normal";
+                            LOGGER.info("Mode: Normal");
+                            wasZ = true;
+                        } else if (!zPressed) wasZ = false;
+
+                        if (xPressed && !wasX) {
+                            currentMode = "Matrix";
+                            LOGGER.info("Mode: Matrix");
+                            wasX = true;
+                        } else if (!xPressed) wasX = false;
+
+                        if (cPressed && !wasC) {
+                            currentMode = "Shift";
+                            LOGGER.info("Mode: Shift");
+                            wasC = true;
+                        } else if (!cPressed) wasC = false;
+
+                        // === Применение таймера ===
+                        if (enabled) {
+                            updateTimer();
+                        } else {
+                            setTickDelta(1.0f);
+                        }
+                    }
+
+                    Thread.sleep(10);
+                } catch (InterruptedException ignored) { break; }
+                catch (Exception e) { LOGGER.error("Timer error", e); }
+            }
+        });
+        workerThread.setDaemon(true);
+        workerThread.start();
+    }
+
+    private void setTickDelta(float value) {
+        try {
+            if (timerField == null) return;
+            Object timer = timerField.get(mc);
+            if (timer == null) return;
+            if (tickDeltaField == null) {
+                tickDeltaField = timer.getClass().getDeclaredField("tickDelta");
+                tickDeltaField.setAccessible(true);
+            }
+            tickDeltaField.setFloat(timer, value);
+        } catch (Exception e) {
+            // игнорируем
         }
     }
 
-    @Override
-    protected void onDisable() {
-        tickTimer = 1.0;
-    }
+    private void updateTimer() {
+        float target = 1.0f;
 
-    @EventTarget
-    public void onUpdate(EventUpdate event) {
-        if (mc.player == null || mc.world == null) return;
-
-        // === Переключение режимов по Z X C ===
-        long window = mc.getWindow().getHandle();
-        boolean zPressed = GLFW.glfwGetKey(window, GLFW.GLFW_KEY_Z) == GLFW.GLFW_PRESS;
-        boolean xPressed = GLFW.glfwGetKey(window, GLFW.GLFW_KEY_X) == GLFW.GLFW_PRESS;
-        boolean cPressed = GLFW.glfwGetKey(window, GLFW.GLFW_KEY_C) == GLFW.GLFW_PRESS;
-        boolean rightShiftPressed = GLFW.glfwGetKey(window, GLFW.GLFW_KEY_RIGHT_SHIFT) == GLFW.GLFW_PRESS;
-
-        // Обработка правого Shift для открытия GUI
-        if (rightShiftPressed && !wasRightShift) {
-            mc.execute(() -> mc.setScreen(new SpeedModGUI(this)));
-            wasRightShift = true;
-        } else if (!rightShiftPressed) {
-            wasRightShift = false;
-        }
-
-        if (zPressed && !wasZ) {
-            mode.setValue("Normal");
-            ChatUtil.message("§6Timer режим: §aNormal");
-            wasZ = true;
-        } else if (!zPressed) wasZ = false;
-
-        if (xPressed && !wasX) {
-            mode.setValue("Matrix");
-            ChatUtil.message("§6Timer режим: §aMatrix");
-            wasX = true;
-        } else if (!xPressed) wasX = false;
-
-        if (cPressed && !wasC) {
-            mode.setValue("Shift");
-            ChatUtil.message("§6Timer режим: §aShift");
-            wasC = true;
-        } else if (!cPressed) wasC = false;
-
-        // === Основная логика ===
-        if (mode.is("Matrix")) {
-            energy = MathHelper.clamp(notMoving() ? energy + 0.025f : energy - (oldMatrix.getValue() ? 0.005f : 0.0f), 0.0f, 1.0f);
-        }
-
-        prevPosX = mc.player.getX();
-        prevPosY = mc.player.getY();
-        prevPosZ = mc.player.getZ();
-        yaw = mc.player.getYaw();
-        pitch = mc.player.getPitch();
-
-        switch (mode.getValue()) {
-            case "Normal" -> tickTimer = speed.getValue();
-            case "Matrix" -> {
-                if (!MovementUtility.isMoving()) {
-                    tickTimer = 1.0;
-                    return;
-                }
-
-                tickTimer = Math.max(speed.getValue(), 1.0);
-
-                if (energy > 0) {
-                    energy = MathHelper.clamp(energy - (float) ((0.1 * speed.getValue()) - 0.1), 0.0f, 1.0f);
+        switch (currentMode) {
+            case "Normal":
+                target = speedMultiplier;
+                break;
+            case "Matrix":
+                if (isPlayerStill()) {
+                    energy = Math.min(energy + 0.025f, 1.0f);
                 } else {
-                    disableWithMessage("Заряд таймера кончился! Отключаю..");
+                    energy = Math.max(energy - 0.005f, 0.0f);
                 }
-            }
-            case "Grim" -> {
-                long setBackTime = System.currentTimeMillis() - lastSetbackTime;
-                if (energy <= 0 || !isKeyPressed(boostKey.getValue()) || setBackTime < 2000) {
-                    tickTimer = 1.0;
-                    return;
+                if (energy > 0 && isPlayerMoving()) {
+                    target = speedMultiplier;
+                    energy = Math.max(energy - (float) ((0.1 * speedMultiplier) - 0.1), 0.0f);
+                } else {
+                    target = 1.0f;
                 }
-
-                tickTimer = Math.max(speed.getValue(), 1.0);
-                energy = MathHelper.clamp(energy - (float) ((0.0025 * speed.getValue()) - 0.0025), 0.0f, 1.0f);
-            }
-            default -> tickTimer = 1.0;
+                break;
+            case "Shift":
+                target = speedMultiplier;
+                break;
+            case "Grim":
+                long window = mc.getWindow().getHandle();
+                boolean boostPressed = GLFW.glfwGetKey(window, GLFW.GLFW_KEY_LEFT_SHIFT) == GLFW.GLFW_PRESS;
+                long now = System.currentTimeMillis();
+                if (boostPressed && (now - lastSetbackTime > 2000)) {
+                    target = speedMultiplier;
+                    energy = Math.max(energy - (float) ((0.0025 * speedMultiplier) - 0.0025), 0.0f);
+                } else {
+                    target = 1.0f;
+                }
+                break;
+            default:
+                target = 1.0f;
         }
+
+        setTickDelta(target);
     }
 
-    @EventTarget
-    public void onPacketReceive(EventPacket event) {
-        if (mc.player == null || mc.world == null) return;
-
-        if (event.getType() == EventPacket.Type.RECEIVE) {
-            if (mode.is("Grim")) {
-                if (event.getPacket() instanceof CommonPingS2CPacket) {
-                    long setBackTime = System.currentTimeMillis() - lastSetbackTime;
-                    if (setBackTime > 2000) {
-                        if (System.currentTimeMillis() - cancelTime > 25000) {
-                            cancelTime = System.currentTimeMillis();
-                            energy = 0.0f;
-                            return;
-                        }
-
-                        if (!MovementUtility.isMoving()) {
-                            energy = MathHelper.clamp(energy + 0.005f, 0.0f, 1.0f);
-                        }
-
-                        event.setCancelled(true);
-                    }
-                }
-            }
-
-            if (event.getPacket() instanceof PlayerPositionLookS2CPacket) {
-                lastSetbackTime = System.currentTimeMillis();
-                switch (onFlag.getValue()) {
-                    case "Reset" -> {
-                        tickTimer = 1.0;
-                        energy = 0.0f;
-                    }
-                    case "Disable" -> {
-                        energy = 0.0f;
-                        disableWithMessage("Отключён т.к. тебя флагнуло!");
-                    }
-                }
-            }
-
-            if (event.getPacket() instanceof EntityVelocityUpdateS2CPacket velo && mode.is("Grim")) {
-                if (velo.getEntityId() == mc.player.getId()) {
-                    tickTimer = 1.0;
-                    energy = 0.0f;
-                }
-            }
-        }
-    }
-
-    @EventTarget
-    public void onPostPlayerUpdate(EventPostPlayerUpdate event) {
-        if (mode.is("Shift")) {
-            if (energy < 0.9f) {
-                disableWithMessage("Перед повторным использованием необходимо постоять на месте!");
-                return;
-            }
-            event.setCancelled(true);
-            event.setIterations(shiftTicks.getValueAsInt());
-            disableWithMessage("Тики пропущены! Отключаем");
-        }
-    }
-
-    public double getTimerSpeed() {
-        return isEnabled() ? tickTimer : 1.0;
-    }
-
-    private void disableWithMessage(String message) {
-        ChatUtil.warn(message);
-        disable();
-    }
-
-    private static boolean notMoving() {
+    private boolean isPlayerStill() {
         if (mc.player == null) return true;
-        return prevPosX == mc.player.getX()
-            && prevPosY == mc.player.getY()
-            && prevPosZ == mc.player.getZ()
-            && yaw == mc.player.getYaw()
-            && pitch == mc.player.getPitch();
+        return mc.player.getVelocity().lengthSquared() < 0.001 &&
+               !mc.options.forwardKey.isPressed() && !mc.options.backKey.isPressed() &&
+               !mc.options.leftKey.isPressed() && !mc.options.rightKey.isPressed();
     }
 
-    private static boolean isKeyPressed(int keyCode) {
-        if (keyCode == GLFW.GLFW_KEY_UNKNOWN) return false;
-        return GLFW.glfwGetKey(MinecraftClient.getInstance().getWindow().getHandle(), keyCode) == GLFW.GLFW_PRESS;
+    private boolean isPlayerMoving() {
+        if (mc.player == null) return false;
+        return mc.player.getVelocity().lengthSquared() > 0.001 ||
+               mc.options.forwardKey.isPressed() || mc.options.backKey.isPressed() ||
+               mc.options.leftKey.isPressed() || mc.options.rightKey.isPressed();
     }
 
     // ======================== GUI ========================
-    public static class SpeedModGUI extends Screen {
-        private final SpeedMod module;
+    private static class TimerGUI extends Screen {
         private ButtonWidget toggleButton;
         private ButtonWidget normalBtn, matrixBtn, shiftBtn, grimBtn;
 
-        protected SpeedModGUI(SpeedMod module) {
+        protected TimerGUI() {
             super(Text.literal("Timer Settings"));
-            this.module = module;
         }
 
         @Override
@@ -245,73 +186,66 @@ public class SpeedMod extends Module {
             int centerX = this.width / 2;
             int startY = this.height / 2 - 50;
 
-            // Кнопка включения/выключения
             toggleButton = ButtonWidget.builder(
-                    Text.literal(module.isEnabled() ? "§aВключён" : "§cВыключен"),
+                    Text.literal(enabled ? "§aВключён" : "§cВыключен"),
                     btn -> {
-                        module.toggle();
-                        btn.setMessage(Text.literal(module.isEnabled() ? "§aВключён" : "§cВыключен"));
+                        enabled = !enabled;
+                        btn.setMessage(Text.literal(enabled ? "§aВключён" : "§cВыключен"));
                     }
             ).dimensions(centerX - 50, startY, 100, 20).build();
             this.addDrawableChild(toggleButton);
 
-            // Кнопки режимов
             normalBtn = ButtonWidget.builder(
-                    Text.literal("Normal"),
+                    Text.literal(currentMode.equals("Normal") ? "§aNormal" : "Normal"),
                     btn -> {
-                        module.mode.setValue("Normal");
-                        updateModeButtons();
-                        ChatUtil.message("§6Timer режим: §aNormal");
+                        currentMode = "Normal";
+                        updateButtons();
                     }
             ).dimensions(centerX - 60, startY + 30, 50, 20).build();
             this.addDrawableChild(normalBtn);
 
             matrixBtn = ButtonWidget.builder(
-                    Text.literal("Matrix"),
+                    Text.literal(currentMode.equals("Matrix") ? "§aMatrix" : "Matrix"),
                     btn -> {
-                        module.mode.setValue("Matrix");
-                        updateModeButtons();
-                        ChatUtil.message("§6Timer режим: §aMatrix");
+                        currentMode = "Matrix";
+                        updateButtons();
                     }
             ).dimensions(centerX, startY + 30, 50, 20).build();
             this.addDrawableChild(matrixBtn);
 
             shiftBtn = ButtonWidget.builder(
-                    Text.literal("Shift"),
+                    Text.literal(currentMode.equals("Shift") ? "§aShift" : "Shift"),
                     btn -> {
-                        module.mode.setValue("Shift");
-                        updateModeButtons();
-                        ChatUtil.message("§6Timer режим: §aShift");
+                        currentMode = "Shift";
+                        updateButtons();
                     }
             ).dimensions(centerX - 60, startY + 60, 50, 20).build();
             this.addDrawableChild(shiftBtn);
 
             grimBtn = ButtonWidget.builder(
-                    Text.literal("Grim"),
+                    Text.literal(currentMode.equals("Grim") ? "§aGrim" : "Grim"),
                     btn -> {
-                        module.mode.setValue("Grim");
-                        updateModeButtons();
-                        ChatUtil.message("§6Timer режим: §aGrim");
+                        currentMode = "Grim";
+                        updateButtons();
                     }
             ).dimensions(centerX, startY + 60, 50, 20).build();
             this.addDrawableChild(grimBtn);
 
-            updateModeButtons();
-
-            // Кнопка закрытия
             ButtonWidget closeBtn = ButtonWidget.builder(
                     Text.literal("Закрыть"),
                     btn -> this.close()
             ).dimensions(centerX - 30, startY + 90, 60, 20).build();
             this.addDrawableChild(closeBtn);
+
+            updateButtons();
         }
 
-        private void updateModeButtons() {
-            String current = module.mode.getValue();
-            normalBtn.setMessage(Text.literal(current.equals("Normal") ? "§aNormal" : "Normal"));
-            matrixBtn.setMessage(Text.literal(current.equals("Matrix") ? "§aMatrix" : "Matrix"));
-            shiftBtn.setMessage(Text.literal(current.equals("Shift") ? "§aShift" : "Shift"));
-            grimBtn.setMessage(Text.literal(current.equals("Grim") ? "§aGrim" : "Grim"));
+        private void updateButtons() {
+            toggleButton.setMessage(Text.literal(enabled ? "§aВключён" : "§cВыключен"));
+            normalBtn.setMessage(Text.literal(currentMode.equals("Normal") ? "§aNormal" : "Normal"));
+            matrixBtn.setMessage(Text.literal(currentMode.equals("Matrix") ? "§aMatrix" : "Matrix"));
+            shiftBtn.setMessage(Text.literal(currentMode.equals("Shift") ? "§aShift" : "Shift"));
+            grimBtn.setMessage(Text.literal(currentMode.equals("Grim") ? "§aGrim" : "Grim"));
         }
 
         @Override
