@@ -22,7 +22,6 @@ public class SpeedMod implements ModInitializer {
                 try {
                     if (mc != null && mc.player != null && mc.world != null) {
                         tickCounter++;
-                        // Отправляем пакеты не каждый тик, а раз в 2 тика (чтобы не спамить)
                         if (tickCounter % 2 == 0) {
                             mc.execute(() -> sendPackets());
                         }
@@ -43,8 +42,14 @@ public class SpeedMod implements ModInitializer {
     private void sendPackets() {
         if (mc.player == null || mc.player.networkHandler == null) return;
 
-        // Отправляем OnGroundOnly (статус только onGround=false)
-        mc.player.networkHandler.sendPacket(new PlayerMoveC2SPacket.OnGroundOnly(false));
+        // Отправляем пакет позиции с onGround = false (обход)
+        mc.player.networkHandler.sendPacket(new PlayerMoveC2SPacket.PositionAndOnGround(
+                mc.player.getX(),
+                mc.player.getY(),
+                mc.player.getZ(),
+                false, // onGround
+                false  // horizontalCollision
+        ));
         // Отправляем START_FALL_FLYING для активации элитр (обход)
         mc.player.networkHandler.sendPacket(new ClientCommandC2SPacket(mc.player, ClientCommandC2SPacket.Mode.START_FALL_FLYING));
     }
