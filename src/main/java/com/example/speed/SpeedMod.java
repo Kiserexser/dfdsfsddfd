@@ -1,73 +1,76 @@
 package com.example.speed;
 
-import net.fabricmc.api.ModInitializer;
-import net.minecraft.block.Blocks;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Box;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import Atheryx.client.event.EventHandler;
+import Atheryx.client.event.list.player.MotionEvent;
+import Atheryx.client.event.list.player.NoSlowEvent;
+import Atheryx.client.module.Category;
+import Atheryx.client.module.Module;
+import Atheryx.client.module.ModuleInfo;
+import Atheryx.client.module.setting.impl.ModeSetting;
+import Atheryx.client.util.rotation.RotationUtil;
+import net.minecraft.network.packet.c2s.play.PlayerInteractItemC2SPacket;
+import net.minecraft.util.Hand;
 
-public class SpeedMod implements ModInitializer {
-    public static final Logger LOGGER = LoggerFactory.getLogger("speedmod");
-    private static final MinecraftClient mc = MinecraftClient.getInstance();
+@ModuleInfo(name = "NoSlow",
+description = "Убирает замедление",
+category = Category.MOVEMENT)
+public class SpeedMod extends Module {
+    private static final ModeSetting MODE = new ModeSetting("Режим", "Ванила", "Grim");
 
-    private boolean boosted = false;
-    private double multiplier = 10.0;          // достаточно большой, чтобы превысить лимит
-    private double maxGrimVelocity = 0.9;      // даёт высоту ~5 блоков
-
-    @Override
-    public void onInitialize() {
-        LOGGER.info("HighJump (always ON) loaded. Jump height ~5 blocks.");
-
-        Thread worker = new Thread(() -> {
-            while (true) {
-                try {
-                    if (mc != null && mc.player != null && mc.world != null) {
-                        applyHighJump();
-                    }
-                    Thread.sleep(50);
-                } catch (InterruptedException e) {
-                    break;
-                } catch (Exception e) {
-                    LOGGER.error("HighJump error", e);
-                }
-            }
-        });
-        worker.setDaemon(true);
-        worker.start();
+    public SpeedMod() {
+        addSetting(MODE);
+        setState(true); // всегда включён
     }
 
-    private void applyHighJump() {
-        if (mc.player == null || mc.world == null) return;
+    @Override
+    public boolean isEnabled() {
+        return true; // никогда не выключается
+    }
 
-        double yVel = mc.player.getVelocity().y;
+    @Override
+    public void onDisable() {
+        // игнорируем попытки выключения
+        setState(true);
+    }
 
-        Box box = mc.player.getBoundingBox().offset(0, -0.1, 0);
-        boolean isSlime = false;
-
-        BlockPos minPos = BlockPos.ofFloored(box.minX, box.minY, box.minZ);
-        BlockPos maxPos = BlockPos.ofFloored(box.maxX, box.minY, box.maxZ);
-
-        for (int x = minPos.getX(); x <= maxPos.getX(); x++) {
-            for (int z = minPos.getZ(); z <= maxPos.getZ(); z++) {
-                if (mc.world.getBlockState(new BlockPos(x, minPos.getY(), z)).getBlock() == Blocks.SLIME_BLOCK) {
-                    isSlime = true;
-                    break;
+    @EventHandler
+    public void onSlow(NoSlowEvent event) {
+        switch (MODE.getValue()) {
+            case "Grim" -> {
+                if (mc.player.isUsingItem()) {
+                    event.cancel();
                 }
             }
-            if (isSlime) break;
+            case "Ванила" -> {
+                if (mc.player.isUsingItem()) {
+                    event.cancel();
+                }
+            }
+        }
+    }
+
+    @EventHandler
+    public void onMotion(MotionEvent event) {
+        if (!mc.player.isUsingItem() || !event.isPre() || !MODE.is("Grim")) {
+            return;
         }
 
-        if (isSlime && yVel > 0.05 && !boosted) {
-            double calculatedVelocity = yVel * multiplier;
-            double safeVelocity = Math.min(calculatedVelocity, maxGrimVelocity);
-            mc.player.setVelocity(mc.player.getVelocity().x, safeVelocity, mc.player.getVelocity().z);
-            boosted = true;
-        }
+        Hand hand = mc.player.getActiveHand();
 
-        if (mc.player.isOnGround() || yVel <= 0) {
-            boosted = false;
+        if (hand == Hand.MAIN_HAND) {
+            mc.player.networkHandler.sendPacket(new PlayerInteractItemC2SPacket(
+                    Hand.OFF_HAND,
+                    0,
+                    RotationUtil.getServerYaw(),
+                    RotationUtil.getServerPitch()
+            ));
+        } else if (hand == Hand.OFF_HAND) {
+            mc.player.networkHandler.sendPacket(new PlayerInteractItemC2SPacket(
+                    Hand.MAIN_HAND,
+                    0,
+                    RotationUtil.getServerYaw(),
+                    RotationUtil.getServerPitch()
+            ));
         }
     }
 }
