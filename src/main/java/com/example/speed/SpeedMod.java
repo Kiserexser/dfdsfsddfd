@@ -15,7 +15,7 @@ public class SpeedMod implements ModInitializer {
     private static final MinecraftClient mc = MinecraftClient.getInstance();
 
     private static boolean enabled = false;
-    private static final float SPEED_MULTIPLIER = 4.0f;
+    private static final float SPEED_MULTIPLIER = 1.7f;
 
     private Thread workerThread;
     private volatile boolean running = true;
@@ -33,14 +33,7 @@ public class SpeedMod implements ModInitializer {
                         boolean kPressed = GLFW.glfwGetKey(window, GLFW.GLFW_KEY_K) == GLFW.GLFW_PRESS;
 
                         if (kPressed && !wasKPressed) {
-                            enabled = !enabled;
-                            // Отправляем сообщение в чат (в основном потоке)
-                            mc.execute(() -> {
-                                if (mc.player != null) {
-                                    mc.player.sendMessage(Text.of("§6NoWeb §7» " + (enabled ? "§aВключён" : "§cВыключен")), true);
-                                }
-                            });
-                            LOGGER.info("NoWeb: " + (enabled ? "ON" : "OFF"));
+                            toggle();
                             wasKPressed = true;
                         } else if (!kPressed) {
                             wasKPressed = false;
@@ -60,6 +53,17 @@ public class SpeedMod implements ModInitializer {
         workerThread.start();
     }
 
+    private void toggle() {
+        enabled = !enabled;
+        mc.execute(() -> {
+            if (mc.player != null) {
+                mc.player.sendMessage(Text.of("§6NoWeb §7» §a" + (enabled ? "Включён" : "Выключен")), true);
+                mc.player.playSound(net.minecraft.sound.SoundEvents.UI_BUTTON_CLICK.value(), 1.0f, 1.0f);
+            }
+        });
+        LOGGER.info("NoWeb: " + (enabled ? "ON" : "OFF"));
+    }
+
     private void onTick() {
         if (mc.player == null || mc.world == null) return;
 
@@ -71,6 +75,7 @@ public class SpeedMod implements ModInitializer {
 
         float yaw = mc.player.getYaw() * 0.017453292F; // радианы
 
+        // Формула движения
         double x = (-Math.sin(yaw) * forward) + (Math.cos(yaw) * strafe);
         double z = ( Math.cos(yaw) * forward) + (Math.sin(yaw) * strafe);
 
@@ -96,6 +101,7 @@ public class SpeedMod implements ModInitializer {
 
         mc.player.setVelocity(x, y, z);
 
+        // небольшая проверка коллизий (как в оригинале)
         if (mc.player.horizontalCollision || mc.player.verticalCollision) {
             Vec3d vel = mc.player.getVelocity();
             mc.player.setVelocity(vel.x, vel.y, vel.z);
@@ -106,7 +112,8 @@ public class SpeedMod implements ModInitializer {
         BlockPos pos = mc.player.getBlockPos();
         var state = mc.world.getBlockState(pos);
         var stateUp = mc.world.getBlockState(pos.up());
-        var stateDown = mc.world.getBlockState(pos.down());
 
-        return state.isOf(Blocks.COBWEB) || stateUp.isOf(Blocks.COBWEB) || stateDown.isOf(Blocks.COBWEB) ||
-               state
+        return state.isOf(Blocks.COBWEB) || stateUp.isOf(Blocks.COBWEB) ||
+               state.isOf(Blocks.SWEET_BERRY_BUSH) || stateUp.isOf(Blocks.SWEET_BERRY_BUSH);
+    }
+}
