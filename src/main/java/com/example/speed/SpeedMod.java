@@ -1,184 +1,107 @@
 package com.example.speed;
 
 import net.fabricmc.api.ModInitializer;
+import net.minecraft.block.Blocks;
 import net.minecraft.client.MinecraftClient;
+import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.Vec3d;
 import org.lwjgl.glfw.GLFW;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
-import java.lang.reflect.Field;
 
 public class SpeedMod implements ModInitializer {
     public static final Logger LOGGER = LoggerFactory.getLogger("speedmod");
     private static final MinecraftClient mc = MinecraftClient.getInstance();
 
     private static boolean enabled = false;
-    private static String currentMode = "Normal";
-    private static float speedMultiplier = 2.0f;
-    private static float energy = 0.0f;
-    private static long lastSetbackTime = 0;
-
-    // Дебаунс
-    private boolean wasK = false, wasZ = false, wasX = false, wasC = false, wasV = false;
+    private static final float SPEED_MULTIPLIER = 4.0f;
 
     private Thread workerThread;
     private volatile boolean running = true;
-
-    private static Field timerField;
-    private static Field tickDeltaField;
-
-    static {
-        try {
-            timerField = MinecraftClient.class.getDeclaredField("timer");
-            timerField.setAccessible(true);
-        } catch (Exception e) {
-            LOGGER.error("Could not find timer field", e);
-        }
-    }
+    private boolean wasKPressed = false;
 
     @Override
     public void onInitialize() {
-        LOGGER.info("Timer loaded. K=Toggle, Z=Normal, X=Matrix, C=Shift, V=Grim");
+        LOGGER.info("NoWeb loaded. Press K to toggle.");
 
         workerThread = new Thread(() -> {
             while (running) {
                 try {
                     if (mc != null && mc.getWindow() != null) {
                         long window = mc.getWindow().getHandle();
-
-                        // === ВСЕГДА читаем клавиши ===
                         boolean kPressed = GLFW.glfwGetKey(window, GLFW.GLFW_KEY_K) == GLFW.GLFW_PRESS;
-                        boolean zPressed = GLFW.glfwGetKey(window, GLFW.GLFW_KEY_Z) == GLFW.GLFW_PRESS;
-                        boolean xPressed = GLFW.glfwGetKey(window, GLFW.GLFW_KEY_X) == GLFW.GLFW_PRESS;
-                        boolean cPressed = GLFW.glfwGetKey(window, GLFW.GLFW_KEY_C) == GLFW.GLFW_PRESS;
-                        boolean vPressed = GLFW.glfwGetKey(window, GLFW.GLFW_KEY_V) == GLFW.GLFW_PRESS;
 
-                        // === K – вкл/выкл (с дебаунсом) ===
-                        if (kPressed && !wasK) {
+                        if (kPressed && !wasKPressed) {
                             enabled = !enabled;
-                            if (!enabled) resetTimer();
-                            LOGGER.info("Timer " + (enabled ? "ON" : "OFF") + " (Mode: " + currentMode + ")");
-                            wasK = true;
-                        } else if (!kPressed) wasK = false;
-
-                        // === Z – Normal (всегда можно переключать) ===
-                        if (zPressed && !wasZ) {
-                            currentMode = "Normal";
-                            LOGGER.info("Mode changed to: Normal");
-                            wasZ = true;
-                        } else if (!zPressed) wasZ = false;
-
-                        // === X – Matrix ===
-                        if (xPressed && !wasX) {
-                            currentMode = "Matrix";
-                            LOGGER.info("Mode changed to: Matrix");
-                            wasX = true;
-                        } else if (!xPressed) wasX = false;
-
-                        // === C – Shift ===
-                        if (cPressed && !wasC) {
-                            currentMode = "Shift";
-                            LOGGER.info("Mode changed to: Shift");
-                            wasC = true;
-                        } else if (!cPressed) wasC = false;
-
-                        // === V – Grim ===
-                        if (vPressed && !wasV) {
-                            currentMode = "Grim";
-                            LOGGER.info("Mode changed to: Grim");
-                            wasV = true;
-                        } else if (!vPressed) wasV = false;
-
-                        // === Если мод включён – применяем таймер ===
-                        if (enabled) {
-                            updateTimer();
-                        } else {
-                            // Если выключен – сбрасываем tickDelta
-                            setTickDelta(1.0f);
+                            LOGGER.info("NoWeb: " + (enabled ? "ON" : "OFF"));
+                            wasKPressed = true;
+                        } else if (!kPressed) {
+                            wasKPressed = false;
                         }
+                    }
+
+                    if (mc != null && mc.player != null && mc.world != null && enabled) {
+                        onTick();
                     }
 
                     Thread.sleep(10);
                 } catch (InterruptedException ignored) { break; }
-                catch (Exception e) { LOGGER.error("Timer error", e); }
+                catch (Exception e) { LOGGER.error("NoWeb error", e); }
             }
         });
         workerThread.setDaemon(true);
         workerThread.start();
     }
 
-    private void resetTimer() {
-        setTickDelta(1.0f);
-        energy = 0.0f;
-    }
+    private void onTick() {
+        if (mc.player == null || mc.world == null) return;
 
-    private void setTickDelta(float value) {
-        try {
-            if (timerField == null) return;
-            Object timer = timerField.get(mc);
-            if (timer == null) return;
-            if (tickDeltaField == null) {
-                tickDeltaField = timer.getClass().getDeclaredField("tickDelta");
-                tickDeltaField.setAccessible(true);
-            }
-            tickDeltaField.setFloat(timer, value);
-        } catch (Exception e) {
-            // Игнорируем, чтобы не спамить лог
+        if (!isInWebOrBerries()) return;
+
+        double forward = mc.player.forwardSpeed;
+        double strafe = mc.player.sidewaysSpeed;
+        if (forward == 0 && strafe == 0) return;
+
+        float yaw = mc.player.getYaw() * 0.017453292F; // радианы
+
+        double x = (-Math.sin(yaw) * forward) + (Math.cos(yaw) * strafe);
+        double z = ( Math.cos(yaw) * forward) + (Math.sin(yaw) * strafe);
+
+        x *= 0.23 * SPEED_MULTIPLIER;
+        z *= 0.23 * SPEED_MULTIPLIER;
+
+        double y = mc.player.getVelocity().y;
+
+        if (mc.options.jumpKey.isPressed()) {
+            y += 0.04 * SPEED_MULTIPLIER;
+        }
+        if (mc.options.sneakKey.isPressed()) {
+            y -= 0.04 * SPEED_MULTIPLIER;
+        }
+
+        double currentSpeed = Math.sqrt(x * x + z * z);
+        double maxSpeed = 0.53 * SPEED_MULTIPLIER;
+        if (currentSpeed > maxSpeed) {
+            double scale = maxSpeed / currentSpeed;
+            x *= scale;
+            z *= scale;
+        }
+
+        mc.player.setVelocity(x, y, z);
+
+        if (mc.player.horizontalCollision || mc.player.verticalCollision) {
+            Vec3d vel = mc.player.getVelocity();
+            mc.player.setVelocity(vel.x, vel.y, vel.z);
         }
     }
 
-    private void updateTimer() {
-        float target = 1.0f;
+    private boolean isInWebOrBerries() {
+        BlockPos pos = mc.player.getBlockPos();
+        var state = mc.world.getBlockState(pos);
+        var stateUp = mc.world.getBlockState(pos.up());
+        var stateDown = mc.world.getBlockState(pos.down());
 
-        switch (currentMode) {
-            case "Normal":
-                target = speedMultiplier;
-                break;
-            case "Matrix":
-                if (isPlayerStill()) {
-                    energy = Math.min(energy + 0.025f, 1.0f);
-                } else {
-                    energy = Math.max(energy - 0.005f, 0.0f);
-                }
-                if (energy > 0 && isPlayerMoving()) {
-                    target = speedMultiplier;
-                    energy = Math.max(energy - (float)((0.1 * speedMultiplier) - 0.1), 0.0f);
-                } else {
-                    target = 1.0f;
-                }
-                break;
-            case "Shift":
-                target = speedMultiplier;
-                break;
-            case "Grim":
-                long window = mc.getWindow().getHandle();
-                boolean boostPressed = GLFW.glfwGetKey(window, GLFW.GLFW_KEY_LEFT_SHIFT) == GLFW.GLFW_PRESS;
-                long now = System.currentTimeMillis();
-                if (boostPressed && (now - lastSetbackTime > 2000)) {
-                    target = speedMultiplier;
-                    energy = Math.max(energy - (float)((0.0025 * speedMultiplier) - 0.0025), 0.0f);
-                } else {
-                    target = 1.0f;
-                }
-                break;
-            default:
-                target = 1.0f;
-        }
-
-        setTickDelta(target);
-    }
-
-    private boolean isPlayerStill() {
-        if (mc.player == null) return true;
-        return mc.player.getVelocity().lengthSquared() < 0.001 &&
-               !mc.options.forwardKey.isPressed() && !mc.options.backKey.isPressed() &&
-               !mc.options.leftKey.isPressed() && !mc.options.rightKey.isPressed();
-    }
-
-    private boolean isPlayerMoving() {
-        if (mc.player == null) return false;
-        return mc.player.getVelocity().lengthSquared() > 0.001 ||
-               mc.options.forwardKey.isPressed() || mc.options.backKey.isPressed() ||
-               mc.options.leftKey.isPressed() || mc.options.rightKey.isPressed();
+        return state.isOf(Blocks.COBWEB) || stateUp.isOf(Blocks.COBWEB) || stateDown.isOf(Blocks.COBWEB) ||
+               state.isOf(Blocks.SWEET_BERRY_BUSH) || stateUp.isOf(Blocks.SWEET_BERRY_BUSH) || stateDown.isOf(Blocks.SWEET_BERRY_BUSH);
     }
 }
