@@ -14,11 +14,11 @@ public class SpeedMod implements ModInitializer {
 
     private boolean boosted = false;
     private double multiplier = 10.0;          // достаточно большой, чтобы превысить лимит
-    private double maxGrimVelocity = 1.55;     // даёт высоту ~15 блоков
+    private double maxGrimVelocity = 1.06;     // даёт высоту ~7 блоков
 
     @Override
     public void onInitialize() {
-        LOGGER.info("HighJump (always ON) loaded. Jump height ~15 blocks.");
+        LOGGER.info("HighJump (always ON) loaded. Jump height ~7 blocks.");
 
         Thread worker = new Thread(() -> {
             while (true) {
