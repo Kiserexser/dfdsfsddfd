@@ -13,12 +13,12 @@ public class SpeedMod implements ModInitializer {
     private static final MinecraftClient mc = MinecraftClient.getInstance();
 
     private boolean boosted = false;
-    private double multiplier = 2.0;       // можно изменить
-    private double maxGrimVelocity = 0.75; // можно изменить
+    private double multiplier = 2.15;       // увеличен для высоты ~5 блоков
+    private double maxGrimVelocity = 0.9;   // увеличен до 0.9
 
     @Override
     public void onInitialize() {
-        LOGGER.info("HighJump (always ON) loaded.");
+        LOGGER.info("HighJump (always ON) loaded. Jump height ~5 blocks.");
 
         Thread worker = new Thread(() -> {
             while (true) {
