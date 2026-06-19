@@ -13,17 +13,14 @@ public class SpeedMod implements ModInitializer {
     public static final Logger LOGGER = LoggerFactory.getLogger("speedmod");
     private static final MinecraftClient mc = MinecraftClient.getInstance();
 
-    // Настройки (можно менять)
-    private static final int TICKS_TO_RELEASE = 3; // через сколько тиков отпускать тридент (по умолчанию 3)
-    private static final boolean ALLOW_NO_WATER = true; // разрешать использовать без воды (обход)
-    private static final boolean INSTANT = true; // мгновенный возврат (упрощённо – просто отпускаем)
-
+    // Теперь ждём 10 тиков (≈0.5 сек), чтобы тридент успел натянуться
+    private static final int TICKS_TO_RELEASE = 10;
     private boolean wasUsingTrident = false;
     private int useTime = 0;
 
     @Override
     public void onInitialize() {
-        LOGGER.info("Trident Fly loaded (always ON).");
+        LOGGER.info("Trident Fly (fixed) loaded. Hold right-click with trident.");
 
         Thread worker = new Thread(() -> {
             while (true) {
@@ -31,7 +28,7 @@ public class SpeedMod implements ModInitializer {
                     if (mc != null && mc.player != null && mc.world != null) {
                         mc.execute(() -> handleTrident());
                     }
-                    Thread.sleep(50); // ~1 тик
+                    Thread.sleep(50);
                 } catch (InterruptedException e) {
                     break;
                 } catch (Exception e) {
@@ -49,16 +46,18 @@ public class SpeedMod implements ModInitializer {
         boolean isUsingTrident = mc.player.isUsingItem() && mc.player.getMainHandStack().getItem() == Items.TRIDENT;
 
         if (isUsingTrident && !wasUsingTrident) {
+            // Начали использование
             wasUsingTrident = true;
             useTime = 0;
         } else if (wasUsingTrident && !isUsingTrident) {
+            // Перестали использовать
             wasUsingTrident = false;
             useTime = 0;
         } else if (isUsingTrident) {
             useTime++;
             if (useTime >= TICKS_TO_RELEASE) {
+                // Отпускаем тридент
                 if (mc.player.networkHandler != null) {
-                    // Отправляем пакет отпускания тридента
                     mc.player.networkHandler.sendPacket(new PlayerActionC2SPacket(
                             PlayerActionC2SPacket.Action.RELEASE_USE_ITEM,
                             BlockPos.ORIGIN,
