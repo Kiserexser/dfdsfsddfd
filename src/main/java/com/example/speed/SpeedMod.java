@@ -14,7 +14,7 @@ public class SpeedMod implements ModInitializer {
 
     @Override
     public void onInitialize() {
-        LOGGER.info("NoWeb (always ON) loaded. Speed x1.7 in webs and sweet berries.");
+        LOGGER.info("NoWeb (always ON) loaded. Speed x1.5 in webs and sweet berries.");
 
         Thread worker = new Thread(() -> {
             while (true) {
@@ -58,7 +58,7 @@ public class SpeedMod implements ModInitializer {
         }
 
         float yaw = mc.player.getYaw() * 0.017453292F;
-        float multiplier = 1.7f; // теперь 1.7
+        float multiplier = 1.5f; // теперь 1.5
         float f = (float) forward * multiplier;
         float s = (float) strafe * multiplier;
 
