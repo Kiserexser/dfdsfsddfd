@@ -46,7 +46,7 @@ public class SpeedMod implements ModInitializer {
     private static final float SLOW_FACTOR = 1.0f / 1.5f;
 
     // ==================== GrimAC Bypass ====================
-    private static boolean grimBypassEnabled = true; // всегда включён
+    private static boolean grimBypassEnabled = true;
     private int grimTickCounter = 0;
 
     // ==================== Поток ====================
@@ -100,11 +100,9 @@ public class SpeedMod implements ModInitializer {
                     }
 
                     if (client != null && client.player != null && client.world != null) {
-                        // --- GrimAC обход (всегда активен) ---
                         if (grimBypassEnabled) {
                             applyGrimBypass();
                         }
-
                         if (killAuraEnabled) {
                             updateKillAura(client);
                         }
@@ -130,17 +128,14 @@ public class SpeedMod implements ModInitializer {
         if (mc.player == null || mc.player.networkHandler == null) return;
 
         grimTickCounter++;
-        // Отправляем поддельный пакет OnGroundOnly каждые 2 тика
         if (grimTickCounter % 2 == 0) {
-            mc.player.networkHandler.sendPacket(new PlayerMoveC2SPacket.OnGroundOnly(false));
+            mc.player.networkHandler.sendPacket(new PlayerMoveC2SPacket.OnGroundOnly(false, false));
         }
 
-        // Коррекция fallDistance, чтобы не накапливалась
         if (mc.player.fallDistance > 0.5f) {
             mc.player.fallDistance = 0f;
         }
 
-        // Иногда отправляем пакет с позицией, немного смещённой, чтобы имитировать "шум"
         if (grimTickCounter % 5 == 0) {
             double offset = 0.0001 * (random.nextDouble() - 0.5);
             mc.player.networkHandler.sendPacket(new PlayerMoveC2SPacket.PositionAndOnGround(
