@@ -47,7 +47,7 @@ public class SpeedMod implements ModInitializer {
         // Определяем базовую скорость ходьбы или спринта
         float speed = mc.player.isSprinting() ? 0.3f : 0.23f;
 
-        // Вычисляем движение
+        // Вычисляем движение (с учётом strafe)
         double x = (-Math.sin(yaw) * forward + Math.cos(yaw) * strafe) * speed;
         double z = ( Math.cos(yaw) * forward + Math.sin(yaw) * strafe) * speed;
 
