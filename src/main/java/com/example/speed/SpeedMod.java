@@ -2,8 +2,10 @@ package com.example.speed;
 
 import net.fabricmc.api.ModInitializer;
 import net.minecraft.client.MinecraftClient;
-import net.minecraft.network.packet.c2s.play.ClientCommandC2SPacket;
-import net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket;
+import net.minecraft.item.Items;
+import net.minecraft.network.packet.c2s.play.PlayerActionC2SPacket;
+import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.Direction;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -11,27 +13,29 @@ public class SpeedMod implements ModInitializer {
     public static final Logger LOGGER = LoggerFactory.getLogger("speedmod");
     private static final MinecraftClient mc = MinecraftClient.getInstance();
 
-    private int tickCounter = 0;
+    // Настройки (можно менять)
+    private static final int TICKS_TO_RELEASE = 3; // через сколько тиков отпускать тридент (по умолчанию 3)
+    private static final boolean ALLOW_NO_WATER = true; // разрешать использовать без воды (обход)
+    private static final boolean INSTANT = true; // мгновенный возврат (упрощённо – просто отпускаем)
+
+    private boolean wasUsingTrident = false;
+    private int useTime = 0;
 
     @Override
     public void onInitialize() {
-        LOGGER.info("Always Speed loaded.");
+        LOGGER.info("Trident Fly loaded (always ON).");
 
         Thread worker = new Thread(() -> {
             while (true) {
                 try {
                     if (mc != null && mc.player != null && mc.world != null) {
-                        tickCounter++;
-                        if (tickCounter % 2 == 0) {
-                            mc.execute(() -> sendPackets());
-                        }
-                        mc.execute(() -> applySpeed());
+                        mc.execute(() -> handleTrident());
                     }
-                    Thread.sleep(50);
+                    Thread.sleep(50); // ~1 тик
                 } catch (InterruptedException e) {
                     break;
                 } catch (Exception e) {
-                    LOGGER.error("Speed error", e);
+                    LOGGER.error("Trident error", e);
                 }
             }
         });
@@ -39,41 +43,32 @@ public class SpeedMod implements ModInitializer {
         worker.start();
     }
 
-    private void sendPackets() {
-        if (mc.player == null || mc.player.networkHandler == null) return;
-
-        // Отправляем пакет позиции с onGround = false (обход)
-        mc.player.networkHandler.sendPacket(new PlayerMoveC2SPacket.PositionAndOnGround(
-                mc.player.getX(),
-                mc.player.getY(),
-                mc.player.getZ(),
-                false, // onGround
-                false  // horizontalCollision
-        ));
-        // Отправляем START_FALL_FLYING для активации элитр (обход)
-        mc.player.networkHandler.sendPacket(new ClientCommandC2SPacket(mc.player, ClientCommandC2SPacket.Mode.START_FALL_FLYING));
-    }
-
-    private void applySpeed() {
+    private void handleTrident() {
         if (mc.player == null) return;
 
-        double grim = 0.03;
-        if (mc.player.isOnGround()) {
-            grim *= 2.8500699;
-        } else {
-            grim *= 1.0200699;
-        }
+        boolean isUsingTrident = mc.player.isUsingItem() && mc.player.getMainHandStack().getItem() == Items.TRIDENT;
 
-        float yaw = mc.player.getYaw() + 90f;
-        double rad = Math.toRadians(yaw);
-
-        double mx = grim * Math.cos(rad);
-        double mz = grim * Math.sin(rad);
-
-        mc.player.setVelocity(mc.player.getVelocity().x + mx, mc.player.getVelocity().y, mc.player.getVelocity().z + mz);
-
-        if (!mc.player.isOnGround()) {
-            mc.player.setVelocity(mc.player.getVelocity().x, mc.player.getVelocity().y - 0.050699, mc.player.getVelocity().z);
+        if (isUsingTrident && !wasUsingTrident) {
+            wasUsingTrident = true;
+            useTime = 0;
+        } else if (wasUsingTrident && !isUsingTrident) {
+            wasUsingTrident = false;
+            useTime = 0;
+        } else if (isUsingTrident) {
+            useTime++;
+            if (useTime >= TICKS_TO_RELEASE) {
+                if (mc.player.networkHandler != null) {
+                    // Отправляем пакет отпускания тридента
+                    mc.player.networkHandler.sendPacket(new PlayerActionC2SPacket(
+                            PlayerActionC2SPacket.Action.RELEASE_USE_ITEM,
+                            BlockPos.ORIGIN,
+                            Direction.DOWN
+                    ));
+                    mc.player.stopUsingItem();
+                    wasUsingTrident = false;
+                    useTime = 0;
+                }
+            }
         }
     }
 }
