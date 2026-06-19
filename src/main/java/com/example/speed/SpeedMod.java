@@ -11,6 +11,8 @@ public class SpeedMod implements ModInitializer {
     public static final Logger LOGGER = LoggerFactory.getLogger("speedmod");
     private static final MinecraftClient mc = MinecraftClient.getInstance();
 
+    private int tickCounter = 0;
+
     @Override
     public void onInitialize() {
         LOGGER.info("Always Speed loaded.");
@@ -19,7 +21,12 @@ public class SpeedMod implements ModInitializer {
             while (true) {
                 try {
                     if (mc != null && mc.player != null && mc.world != null) {
-                        applySpeed();
+                        tickCounter++;
+                        // Отправляем пакеты не каждый тик, а раз в 2 тика (чтобы не спамить)
+                        if (tickCounter % 2 == 0) {
+                            mc.execute(() -> sendPackets());
+                        }
+                        mc.execute(() -> applySpeed());
                     }
                     Thread.sleep(50);
                 } catch (InterruptedException e) {
@@ -33,18 +40,18 @@ public class SpeedMod implements ModInitializer {
         worker.start();
     }
 
+    private void sendPackets() {
+        if (mc.player == null || mc.player.networkHandler == null) return;
+
+        // Отправляем OnGroundOnly (статус только onGround=false)
+        mc.player.networkHandler.sendPacket(new PlayerMoveC2SPacket.OnGroundOnly(false));
+        // Отправляем START_FALL_FLYING для активации элитр (обход)
+        mc.player.networkHandler.sendPacket(new ClientCommandC2SPacket(mc.player, ClientCommandC2SPacket.Mode.START_FALL_FLYING));
+    }
+
     private void applySpeed() {
-        if (mc.player == null || mc.world == null) return;
+        if (mc.player == null) return;
 
-        // Отправляем пакеты для обхода (как в оригинале)
-        if (mc.player.networkHandler != null) {
-            // ServerboundMovePlayerPacket.StatusOnly(false, false)
-            mc.player.networkHandler.sendPacket(new PlayerMoveC2SPacket.StatusOnly(false));
-            // ServerboundPlayerCommandPacket.Action.START_FALL_FLYING
-            mc.player.networkHandler.sendPacket(new ClientCommandC2SPacket(mc.player, ClientCommandC2SPacket.Mode.START_FALL_FLYING));
-        }
-
-        // Основная формула скорости
         double grim = 0.03;
         if (mc.player.isOnGround()) {
             grim *= 2.8500699;
@@ -52,17 +59,14 @@ public class SpeedMod implements ModInitializer {
             grim *= 1.0200699;
         }
 
-        // Направление движения (используем yaw игрока)
-        float yaw = mc.player.getYaw() + 90f; // как в коде: (getdir() + 90f)
+        float yaw = mc.player.getYaw() + 90f;
         double rad = Math.toRadians(yaw);
 
         double mx = grim * Math.cos(rad);
         double mz = grim * Math.sin(rad);
 
-        // Добавляем к текущей скорости
         mc.player.setVelocity(mc.player.getVelocity().x + mx, mc.player.getVelocity().y, mc.player.getVelocity().z + mz);
 
-        // Если не на земле, добавляем отрицательную вертикальную скорость
         if (!mc.player.isOnGround()) {
             mc.player.setVelocity(mc.player.getVelocity().x, mc.player.getVelocity().y - 0.050699, mc.player.getVelocity().z);
         }
