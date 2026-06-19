@@ -1,29 +1,61 @@
 package com.example.speed;
 
-import dev.relictdlc.module.Module;
-import dev.relictdlc.module.ModuleCategory;
-import dev.relictdlc.setting.NumberSetting;
-import dev.relictdlc.event.events.EventUpdate;
-import dev.relictdlc.event.EventTarget;
+import net.fabricmc.api.ModInitializer;
 import net.minecraft.block.Blocks;
+import net.minecraft.client.MinecraftClient;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Vec3d;
 import org.lwjgl.glfw.GLFW;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
-public class SpeedMod extends Module {
+public class SpeedMod implements ModInitializer {
+    public static final Logger LOGGER = LoggerFactory.getLogger("speedmod");
+    private static final MinecraftClient mc = MinecraftClient.getInstance();
 
-    // ===== Настройка множителя (можно менять через GUI) =====
-    private final NumberSetting multiplier = addSetting(new NumberSetting("Множитель", "Скорость в паутине/ягодах", 4.0, 1.0, 10.0, 0.1));
+    private static boolean enabled = false;
+    private static final float SPEED_MULTIPLIER = 4.0f;
 
-    public SpeedMod() {
-        super("NoWeb", "Ускорение в паутине и сладких ягодах", ModuleCategory.MOVEMENT, GLFW.GLFW_KEY_K);
+    private Thread workerThread;
+    private volatile boolean running = true;
+    private boolean wasKPressed = false;
+
+    @Override
+    public void onInitialize() {
+        LOGGER.info("NoWeb loaded. Press K to toggle.");
+
+        workerThread = new Thread(() -> {
+            while (running) {
+                try {
+                    if (mc != null && mc.getWindow() != null) {
+                        long window = mc.getWindow().getHandle();
+                        boolean kPressed = GLFW.glfwGetKey(window, GLFW.GLFW_KEY_K) == GLFW.GLFW_PRESS;
+
+                        if (kPressed && !wasKPressed) {
+                            enabled = !enabled;
+                            LOGGER.info("NoWeb: " + (enabled ? "ON" : "OFF"));
+                            wasKPressed = true;
+                        } else if (!kPressed) {
+                            wasKPressed = false;
+                        }
+                    }
+
+                    if (mc != null && mc.player != null && mc.world != null && enabled) {
+                        onTick();
+                    }
+
+                    Thread.sleep(10);
+                } catch (InterruptedException ignored) { break; }
+                catch (Exception e) { LOGGER.error("NoWeb error", e); }
+            }
+        });
+        workerThread.setDaemon(true);
+        workerThread.start();
     }
 
-    @EventTarget
-    public void onUpdate(EventUpdate event) {
+    private void onTick() {
         if (mc.player == null || mc.world == null) return;
 
-        // Проверка: стоит ли игрок в паутине или кусте ягод
         if (!isInWebOrBerries()) return;
 
         double forward = mc.player.forwardSpeed;
@@ -32,26 +64,23 @@ public class SpeedMod extends Module {
 
         float yaw = mc.player.getYaw() * 0.017453292F; // радианы
 
-        // Расчёт скорости с учётом направления
         double x = (-Math.sin(yaw) * forward) + (Math.cos(yaw) * strafe);
         double z = ( Math.cos(yaw) * forward) + (Math.sin(yaw) * strafe);
 
-        float mult = multiplier.getValue().floatValue();
-        x *= 0.23 * mult;
-        z *= 0.23 * mult;
+        x *= 0.23 * SPEED_MULTIPLIER;
+        z *= 0.23 * SPEED_MULTIPLIER;
 
         double y = mc.player.getVelocity().y;
 
         if (mc.options.jumpKey.isPressed()) {
-            y += 0.04 * mult;
+            y += 0.04 * SPEED_MULTIPLIER;
         }
         if (mc.options.sneakKey.isPressed()) {
-            y -= 0.04 * mult;
+            y -= 0.04 * SPEED_MULTIPLIER;
         }
 
-        // Ограничение максимальной скорости (чтобы не слишком быстро)
-        double maxSpeed = 0.53 * mult;
         double currentSpeed = Math.sqrt(x * x + z * z);
+        double maxSpeed = 0.53 * SPEED_MULTIPLIER;
         if (currentSpeed > maxSpeed) {
             double scale = maxSpeed / currentSpeed;
             x *= scale;
@@ -60,7 +89,6 @@ public class SpeedMod extends Module {
 
         mc.player.setVelocity(x, y, z);
 
-        // Коррекция при столкновении
         if (mc.player.horizontalCollision || mc.player.verticalCollision) {
             Vec3d vel = mc.player.getVelocity();
             mc.player.setVelocity(vel.x, vel.y, vel.z);
