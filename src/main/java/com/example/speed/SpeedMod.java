@@ -3,6 +3,7 @@ package com.example.speed;
 import net.fabricmc.api.ModInitializer;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.entity.LivingEntity;
+import net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket;
 import net.minecraft.text.Text;
 import net.minecraft.util.math.Box;
 import net.minecraft.util.math.MathHelper;
@@ -42,19 +43,22 @@ public class SpeedMod implements ModInitializer {
 
     // ==================== SlowFall ====================
     private static boolean slowFallEnabled = false;
-    private static final float SLOW_FACTOR = 1.0f / 1.5f; // 0.666... (замедление в 1.5 раза)
+    private static final float SLOW_FACTOR = 1.0f / 1.5f;
+
+    // ==================== GrimAC Bypass ====================
+    private static boolean grimBypassEnabled = true; // всегда включён
+    private int grimTickCounter = 0;
 
     // ==================== Поток ====================
     private Thread workerThread;
     private volatile boolean running = true;
 
-    // Дебаунс клавиш
     private boolean wasRPressed = false;
     private boolean wasGPressed = false;
 
     @Override
     public void onInitialize() {
-        LOGGER.info("KillAura (R) and SlowFall (G) loaded.");
+        LOGGER.info("KillAura (R) and SlowFall (G) with GrimAC bypass loaded.");
 
         workerThread = new Thread(() -> {
             MinecraftClient client = MinecraftClient.getInstance();
@@ -63,7 +67,6 @@ public class SpeedMod implements ModInitializer {
                     if (client != null && client.getWindow() != null) {
                         long window = client.getWindow().getHandle();
 
-                        // === Обработка R (KillAura) ===
                         boolean rPressed = GLFW.glfwGetKey(window, GLFW.GLFW_KEY_R) == GLFW.GLFW_PRESS;
                         if (rPressed && !wasRPressed) {
                             killAuraEnabled = !killAuraEnabled;
@@ -80,7 +83,6 @@ public class SpeedMod implements ModInitializer {
                             wasRPressed = false;
                         }
 
-                        // === Обработка G (SlowFall) ===
                         boolean gPressed = GLFW.glfwGetKey(window, GLFW.GLFW_KEY_G) == GLFW.GLFW_PRESS;
                         if (gPressed && !wasGPressed) {
                             slowFallEnabled = !slowFallEnabled;
@@ -97,8 +99,12 @@ public class SpeedMod implements ModInitializer {
                         }
                     }
 
-                    // === Выполнение модулей ===
                     if (client != null && client.player != null && client.world != null) {
+                        // --- GrimAC обход (всегда активен) ---
+                        if (grimBypassEnabled) {
+                            applyGrimBypass();
+                        }
+
                         if (killAuraEnabled) {
                             updateKillAura(client);
                         }
@@ -119,7 +125,35 @@ public class SpeedMod implements ModInitializer {
         workerThread.start();
     }
 
-    // ==================== KillAura Логика ====================
+    // ==================== GrimAC Bypass Logic ====================
+    private void applyGrimBypass() {
+        if (mc.player == null || mc.player.networkHandler == null) return;
+
+        grimTickCounter++;
+        // Отправляем поддельный пакет OnGroundOnly каждые 2 тика
+        if (grimTickCounter % 2 == 0) {
+            mc.player.networkHandler.sendPacket(new PlayerMoveC2SPacket.OnGroundOnly(false));
+        }
+
+        // Коррекция fallDistance, чтобы не накапливалась
+        if (mc.player.fallDistance > 0.5f) {
+            mc.player.fallDistance = 0f;
+        }
+
+        // Иногда отправляем пакет с позицией, немного смещённой, чтобы имитировать "шум"
+        if (grimTickCounter % 5 == 0) {
+            double offset = 0.0001 * (random.nextDouble() - 0.5);
+            mc.player.networkHandler.sendPacket(new PlayerMoveC2SPacket.PositionAndOnGround(
+                    mc.player.getX() + offset,
+                    mc.player.getY(),
+                    mc.player.getZ() + offset,
+                    false,
+                    false
+            ));
+        }
+    }
+
+    // ==================== KillAura Logic ====================
     private void updateKillAura(MinecraftClient client) {
         if (client.player == null || client.world == null) return;
 
@@ -218,7 +252,7 @@ public class SpeedMod implements ModInitializer {
         return from + step;
     }
 
-    // ==================== SlowFall Логика ====================
+    // ==================== SlowFall Logic ====================
     private void applySlowFall() {
         if (mc.player == null) return;
 
