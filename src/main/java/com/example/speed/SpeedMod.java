@@ -3,6 +3,7 @@ package com.example.speed;
 import net.fabricmc.api.ModInitializer;
 import net.minecraft.block.Blocks;
 import net.minecraft.client.MinecraftClient;
+import net.minecraft.text.Text;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Vec3d;
 import org.lwjgl.glfw.GLFW;
@@ -33,6 +34,12 @@ public class SpeedMod implements ModInitializer {
 
                         if (kPressed && !wasKPressed) {
                             enabled = !enabled;
+                            // Отправляем сообщение в чат (в основном потоке)
+                            mc.execute(() -> {
+                                if (mc.player != null) {
+                                    mc.player.sendMessage(Text.of("§6NoWeb §7» " + (enabled ? "§aВключён" : "§cВыключен")), true);
+                                }
+                            });
                             LOGGER.info("NoWeb: " + (enabled ? "ON" : "OFF"));
                             wasKPressed = true;
                         } else if (!kPressed) {
@@ -102,6 +109,4 @@ public class SpeedMod implements ModInitializer {
         var stateDown = mc.world.getBlockState(pos.down());
 
         return state.isOf(Blocks.COBWEB) || stateUp.isOf(Blocks.COBWEB) || stateDown.isOf(Blocks.COBWEB) ||
-               state.isOf(Blocks.SWEET_BERRY_BUSH) || stateUp.isOf(Blocks.SWEET_BERRY_BUSH) || stateDown.isOf(Blocks.SWEET_BERRY_BUSH);
-    }
-}
+               state
