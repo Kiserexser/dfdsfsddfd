@@ -1,119 +1,55 @@
-package com.example.speed;
+package rich.modules.impl.movement;
 
-import net.fabricmc.api.ModInitializer;
+import lombok.AccessLevel;
+import lombok.experimental.FieldDefaults;
 import net.minecraft.block.Blocks;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.text.Text;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Vec3d;
-import org.lwjgl.glfw.GLFW;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import net.minecraft.util.math.MathHelper;
+import rich.events.api.EventHandler;
+import rich.events.impl.TickEvent;
+import rich.modules.module.ModuleStructure;
+import rich.modules.module.category.ModuleCategory;
+import rich.modules.module.setting.implement.SelectSetting;
+import rich.util.Instance;
+import rich.util.string.PlayerInteractionHelper;
 
-public class SpeedMod implements ModInitializer {
-    public static final Logger LOGGER = LoggerFactory.getLogger("speedmod");
-    private static final MinecraftClient mc = MinecraftClient.getInstance();
+@FieldDefaults(level = AccessLevel.PRIVATE)
+public class NoWeb extends ModuleStructure {
+    public static NoWeb getInstance() {
+        return Instance.get(NoWeb.class);
+    }
 
-    private static boolean enabled = false;
-    private static final float SPEED_MULTIPLIER = 1.7f;
+    public final SelectSetting webMode = new SelectSetting("Режим", "Выберите режим обхода").value("Grim");
 
-    private Thread workerThread;
-    private volatile boolean running = true;
-    private boolean wasKPressed = false;
+    public NoWeb() {
+        super("NoWeb", "No Web", ModuleCategory.MOVEMENT);
+        settings(webMode);
+        setState(true); // сразу включаем
+    }
 
     @Override
-    public void onInitialize() {
-        LOGGER.info("NoWeb loaded. Press K to toggle.");
+    public boolean isEnabled() {
+        return true; // всегда включён, рубильник не нужен
+    }
 
-        workerThread = new Thread(() -> {
-            while (running) {
-                try {
-                    if (mc != null && mc.getWindow() != null) {
-                        long window = mc.getWindow().getHandle();
-                        boolean kPressed = GLFW.glfwGetKey(window, GLFW.GLFW_KEY_K) == GLFW.GLFW_PRESS;
+    @EventHandler
+    public void onTick(TickEvent e) {
+        boolean inWeb = PlayerInteractionHelper.isPlayerInBlock(Blocks.COBWEB);
+        boolean inBerries = PlayerInteractionHelper.isPlayerInBlock(Blocks.SWEET_BERRY_BUSH);
 
-                        if (kPressed && !wasKPressed) {
-                            toggle();
-                            wasKPressed = true;
-                        } else if (!kPressed) {
-                            wasKPressed = false;
-                        }
-                    }
-
-                    if (mc != null && mc.player != null && mc.world != null && enabled) {
-                        onTick();
-                    }
-
-                    Thread.sleep(10);
-                } catch (InterruptedException ignored) { break; }
-                catch (Exception e) { LOGGER.error("NoWeb error", e); }
+        if (inWeb || inBerries) {
+            double motionY = mc.options.jumpKey.isPressed() ? 1.3 : mc.options.sneakKey.isPressed() ? -1.3 : 0;
+            float yaw = mc.player.getYaw() * ((float) Math.PI / 180.0F);
+            // Множитель 4x: 0.633 * 4 = 2.532
+            float multiplier = 2.532f;
+            float f = mc.player.forwardSpeed * multiplier;
+            float s = mc.player.sidewaysSpeed * multiplier;
+            
+            if (f != 0 || s != 0) {
+                mc.player.setVelocity(-MathHelper.sin(yaw) * f + MathHelper.cos(yaw) * s, motionY,
+                                      MathHelper.cos(yaw) * f + MathHelper.sin(yaw) * s);
+            } else {
+                mc.player.setVelocity(0, motionY, 0);
             }
-        });
-        workerThread.setDaemon(true);
-        workerThread.start();
-    }
-
-    private void toggle() {
-        enabled = !enabled;
-        mc.execute(() -> {
-            if (mc.player != null) {
-                mc.player.sendMessage(Text.of("§6NoWeb §7» §a" + (enabled ? "Включён" : "Выключен")), true);
-                mc.player.playSound(net.minecraft.sound.SoundEvents.UI_BUTTON_CLICK.value(), 1.0f, 1.0f);
-            }
-        });
-        LOGGER.info("NoWeb: " + (enabled ? "ON" : "OFF"));
-    }
-
-    private void onTick() {
-        if (mc.player == null || mc.world == null) return;
-
-        if (!isInWebOrBerries()) return;
-
-        double forward = mc.player.forwardSpeed;
-        double strafe = mc.player.sidewaysSpeed;
-        if (forward == 0 && strafe == 0) return;
-
-        float yaw = mc.player.getYaw() * 0.017453292F; // радианы
-
-        // Формула движения
-        double x = (-Math.sin(yaw) * forward) + (Math.cos(yaw) * strafe);
-        double z = ( Math.cos(yaw) * forward) + (Math.sin(yaw) * strafe);
-
-        x *= 0.23 * SPEED_MULTIPLIER;
-        z *= 0.23 * SPEED_MULTIPLIER;
-
-        double y = mc.player.getVelocity().y;
-
-        if (mc.options.jumpKey.isPressed()) {
-            y += 0.04 * SPEED_MULTIPLIER;
         }
-        if (mc.options.sneakKey.isPressed()) {
-            y -= 0.04 * SPEED_MULTIPLIER;
-        }
-
-        double currentSpeed = Math.sqrt(x * x + z * z);
-        double maxSpeed = 0.53 * SPEED_MULTIPLIER;
-        if (currentSpeed > maxSpeed) {
-            double scale = maxSpeed / currentSpeed;
-            x *= scale;
-            z *= scale;
-        }
-
-        mc.player.setVelocity(x, y, z);
-
-        // небольшая проверка коллизий (как в оригинале)
-        if (mc.player.horizontalCollision || mc.player.verticalCollision) {
-            Vec3d vel = mc.player.getVelocity();
-            mc.player.setVelocity(vel.x, vel.y, vel.z);
-        }
-    }
-
-    private boolean isInWebOrBerries() {
-        BlockPos pos = mc.player.getBlockPos();
-        var state = mc.world.getBlockState(pos);
-        var stateUp = mc.world.getBlockState(pos.up());
-
-        return state.isOf(Blocks.COBWEB) || stateUp.isOf(Blocks.COBWEB) ||
-               state.isOf(Blocks.SWEET_BERRY_BUSH) || stateUp.isOf(Blocks.SWEET_BERRY_BUSH);
     }
 }
