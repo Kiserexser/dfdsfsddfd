@@ -1,41 +1,44 @@
 package com.example.speed;
 
-import dev.relictdlc.module.Module;
-import dev.relictdlc.module.ModuleCategory;
-import dev.relictdlc.setting.NumberSetting;
+import net.fabricmc.api.ModInitializer;
 import net.minecraft.block.Blocks;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Box;
-import org.lwjgl.glfw.GLFW;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
-public class SpeedMod extends Module {
-
-    public final NumberSetting multiplier = addSetting(new NumberSetting("Множитель", "Сила взлета", 2.0, 1.0, 5.0, 0.1));
-    public final NumberSetting maxGrimVelocity = addSetting(new NumberSetting("Скорость", "Максимальная скорость по Y", 0.75, 0.5, 1.5, 0.05));
+public class SpeedMod implements ModInitializer {
+    public static final Logger LOGGER = LoggerFactory.getLogger("speedmod");
+    private static final MinecraftClient mc = MinecraftClient.getInstance();
 
     private boolean boosted = false;
-    private final MinecraftClient mc = MinecraftClient.getInstance();
-
-    public SpeedMod() {
-        super("HighJump", "Буст от заряда на слизи", ModuleCategory.MOVEMENT, GLFW.GLFW_KEY_UNKNOWN);
-        setState(true); // всегда включён
-    }
+    private double multiplier = 2.0;       // можно изменить
+    private double maxGrimVelocity = 0.75; // можно изменить
 
     @Override
-    public boolean isEnabled() {
-        return true; // всегда активен
+    public void onInitialize() {
+        LOGGER.info("HighJump (always ON) loaded.");
+
+        Thread worker = new Thread(() -> {
+            while (true) {
+                try {
+                    if (mc != null && mc.player != null && mc.world != null) {
+                        applyHighJump();
+                    }
+                    Thread.sleep(50);
+                } catch (InterruptedException e) {
+                    break;
+                } catch (Exception e) {
+                    LOGGER.error("HighJump error", e);
+                }
+            }
+        });
+        worker.setDaemon(true);
+        worker.start();
     }
 
-    @Override
-    public void onDisable() {
-        // не даём отключиться
-        boosted = false;
-        setState(true); // если кто-то попытается выключить, принудительно включаем обратно
-    }
-
-    @dev.relictdlc.event.EventTarget
-    public void onUpdate(dev.relictdlc.event.events.EventUpdate event) {
+    private void applyHighJump() {
         if (mc.player == null || mc.world == null) return;
 
         double yVel = mc.player.getVelocity().y;
@@ -57,8 +60,8 @@ public class SpeedMod extends Module {
         }
 
         if (isSlime && yVel > 0.05 && !boosted) {
-            double calculatedVelocity = yVel * multiplier.getValue();
-            double safeVelocity = Math.min(calculatedVelocity, maxGrimVelocity.getValue());
+            double calculatedVelocity = yVel * multiplier;
+            double safeVelocity = Math.min(calculatedVelocity, maxGrimVelocity);
             mc.player.setVelocity(mc.player.getVelocity().x, safeVelocity, mc.player.getVelocity().z);
             boosted = true;
         }
