@@ -5,7 +5,6 @@ import net.minecraft.block.Blocks;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.MathHelper;
-import net.minecraft.util.math.Vec3d;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -15,18 +14,15 @@ public class SpeedMod implements ModInitializer {
 
     @Override
     public void onInitialize() {
-        LOGGER.info("NoWeb (always ON) loaded. Speed x4 in webs and sweet berries.");
+        LOGGER.info("NoWeb (always ON) loaded. Speed x1.6 in webs and sweet berries.");
 
-        // Подписываемся на тики через отдельный поток (для простоты)
-        // Но лучше использовать ClientTickEvents, но без Fabric API мы сделаем через поток
-        // Для простоты и надёжности используем отдельный поток, который будет применять скорость каждый тик.
         Thread worker = new Thread(() -> {
             while (true) {
                 try {
                     if (mc != null && mc.player != null && mc.world != null) {
                         applySpeed();
                     }
-                    Thread.sleep(50); // ~20 тиков в секунду (достаточно)
+                    Thread.sleep(50);
                 } catch (InterruptedException e) {
                     break;
                 } catch (Exception e) {
@@ -41,7 +37,6 @@ public class SpeedMod implements ModInitializer {
     private void applySpeed() {
         if (mc.player == null || mc.world == null) return;
 
-        // Проверяем, находится ли игрок в паутине или сладких ягодах
         BlockPos pos = mc.player.getBlockPos();
         boolean inWeb = mc.world.getBlockState(pos).isOf(Blocks.COBWEB) ||
                         mc.world.getBlockState(pos.up()).isOf(Blocks.COBWEB) ||
@@ -52,21 +47,18 @@ public class SpeedMod implements ModInitializer {
 
         if (!inWeb && !inBerries) return;
 
-        // Получаем ввод игрока
         double forward = mc.player.forwardSpeed;
         double strafe = mc.player.sidewaysSpeed;
         double motionY = mc.player.getVelocity().y;
 
-        // Вертикаль (прыжок/присед)
         if (mc.options.jumpKey.isPressed()) {
-            motionY = 0.42; // стандартный прыжок
+            motionY = 0.42;
         } else if (mc.options.sneakKey.isPressed()) {
-            motionY = -0.08; // приседание
+            motionY = -0.08;
         }
 
-        // Вычисляем горизонтальную скорость с множителем 4
-        float yaw = mc.player.getYaw() * 0.017453292F; // радианы
-        float multiplier = 4.0f;
+        float yaw = mc.player.getYaw() * 0.017453292F;
+        float multiplier = 1.6f; // в 2.5 раза меньше, чем 4.0
         float f = (float) forward * multiplier;
         float s = (float) strafe * multiplier;
 
@@ -79,10 +71,7 @@ public class SpeedMod implements ModInitializer {
             motionZ = 0;
         }
 
-        // Применяем скорость
         mc.player.setVelocity(motionX, motionY, motionZ);
-
-        // Сбрасываем fallDistance, чтобы не получать урон
         mc.player.fallDistance = 0;
     }
 }
