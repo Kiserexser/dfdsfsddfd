@@ -1,4 +1,4 @@
-com.example.speed;
+package com.example.speed;
 
 import net.fabricmc.api.ModInitializer;
 import net.minecraft.client.MinecraftClient;
@@ -17,10 +17,10 @@ import java.util.Random;
 public class SpeedMod implements ModInitializer {
     public static final Logger LOGGER = LoggerFactory.getLogger("speedmod");
 
-    // === Жёсткие настройки (не редактируются) ===
+    // === Настройки ===
     private static final double RANGE = 4.5;
-    private static final double MIN_DELAY = 0.680;
-    private static final double MAX_DELAY = 0.700;
+    private static final double MIN_DELAY = 0.680;   // изменено
+    private static final double MAX_DELAY = 0.700;   // изменено
     private static final boolean SPRINT_RESET = true;
     private static final float SMOOTH_SPEED = 0.15f;
     private static final boolean ENABLE_SHIFT = true;
@@ -55,7 +55,7 @@ public class SpeedMod implements ModInitializer {
                             enabled = !enabled;
                             if (!enabled) lockedTarget = null;
                             LOGGER.info("KillAura: " + (enabled ? "ON" : "OFF"));
-                            Thread.sleep(300); // дебаунс
+                            Thread.sleep(300);
                         }
                     }
 
