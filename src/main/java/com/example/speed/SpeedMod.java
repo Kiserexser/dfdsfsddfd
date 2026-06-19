@@ -3,6 +3,7 @@ package com.example.speed;
 import net.fabricmc.api.ModInitializer;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.entity.LivingEntity;
+import net.minecraft.util.hit.HitResult;
 import net.minecraft.util.math.Box;
 import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.Vec3d;
@@ -17,21 +18,26 @@ import java.util.Random;
 public class SpeedMod implements ModInitializer {
     public static final Logger LOGGER = LoggerFactory.getLogger("speedmod");
 
-    // === Жёсткие настройки (не редактируются) ===
-    private static final double RANGE = 4.5;
-    private static final double MIN_DELAY = 0.680;
-    private static final double MAX_DELAY = 0.700;
+    // === НАСТРОЙКИ ===
+    private static final double RANGE = 4.2;
+    private static final double MIN_DELAY = 0.690;   // изменено
+    private static final double MAX_DELAY = 0.730;   // изменено
     private static final boolean SPRINT_RESET = true;
-    private static final float SMOOTH_SPEED = 0.15f;
+    private static final float SMOOTH_SPEED = 0.08f;
     private static final boolean ENABLE_SHIFT = true;
-    private static final float SHIFT_DEGREES = 0.5f;
-    private static final long SHIFT_DURATION_MS = 3000;
-    private static final long RETURN_DURATION_MS = 2000;
-    private static final float JITTER_RANGE = 0.15f;
+    private static final float SHIFT_DEGREES = 0.8f;
+    private static final long SHIFT_DURATION_MS = 2500;
+    private static final long RETURN_DURATION_MS = 1500;
+    private static final float JITTER_RANGE = 0.3f;
+    private static final boolean RAYCAST_CHECK = true;
+    private static final float MISS_CHANCE = 0.05f;
+    private static final int MAX_ATTACKS_PER_SECOND = 8;
 
     private static boolean enabled = false;
     private static final Random random = new Random();
     private long lastAttackTime = 0;
+    private long lastSecondCheck = System.currentTimeMillis();
+    private int attacksInSecond = 0;
 
     private Thread workerThread;
     private volatile boolean running = true;
@@ -41,9 +47,12 @@ public class SpeedMod implements ModInitializer {
     private boolean isShiftPhase = true;
     private LivingEntity lockedTarget = null;
 
+    private double targetOffsetX = 0, targetOffsetZ = 0;
+    private double offsetTime = 0;
+
     @Override
     public void onInitialize() {
-        LOGGER.info("SpeedMod KillAura loaded. Press R to toggle.");
+        LOGGER.info("KillAura (Orim-friendly) loaded. Press R to toggle.");
 
         workerThread = new Thread(() -> {
             MinecraftClient client = MinecraftClient.getInstance();
@@ -55,7 +64,7 @@ public class SpeedMod implements ModInitializer {
                             enabled = !enabled;
                             if (!enabled) lockedTarget = null;
                             LOGGER.info("KillAura: " + (enabled ? "ON" : "OFF"));
-                            Thread.sleep(300); // дебаунс
+                            Thread.sleep(300);
                         }
                     }
 
@@ -65,11 +74,16 @@ public class SpeedMod implements ModInitializer {
                     }
 
                     long now = System.currentTimeMillis();
-                    long elapsed = now - shiftCycleStart;
-                    if (isShiftPhase && elapsed >= SHIFT_DURATION_MS) {
+                    if (now - lastSecondCheck >= 1000) {
+                        attacksInSecond = 0;
+                        lastSecondCheck = now;
+                    }
+
+                    long elapsedShift = now - shiftCycleStart;
+                    if (isShiftPhase && elapsedShift >= SHIFT_DURATION_MS) {
                         isShiftPhase = false;
                         shiftCycleStart = now;
-                    } else if (!isShiftPhase && elapsed >= RETURN_DURATION_MS) {
+                    } else if (!isShiftPhase && elapsedShift >= RETURN_DURATION_MS) {
                         isShiftPhase = true;
                         shiftCycleStart = now;
                     }
@@ -97,8 +111,26 @@ public class SpeedMod implements ModInitializer {
                         continue;
                     }
 
+                    if (RAYCAST_CHECK) {
+                        Vec3d eye = client.player.getEyePos();
+                        Vec3d lookVec = target.getPos().add(0, target.getHeight() * 0.5, 0).subtract(eye).normalize();
+                        HitResult hit = client.world.raycast(eye, eye.add(lookVec.multiply(RANGE)), Box.of(eye, 0.1, 0.1, 0.1), (entity) -> entity == target, 0.1);
+                        if (hit == null || hit.getType() != HitResult.Type.ENTITY) {
+                            // цель не видна – пропускаем атаку
+                        }
+                    }
+
+                    double targetWidth = target.getWidth();
+                    double targetHeight = target.getHeight();
+                    offsetTime += 0.02;
+                    double noiseX = Math.sin(offsetTime * 1.3) * 0.2 + Math.sin(offsetTime * 0.7 + 1.0) * 0.1;
+                    double noiseZ = Math.cos(offsetTime * 0.9) * 0.2 + Math.cos(offsetTime * 1.1 + 0.5) * 0.1;
+                    double maxOffset = 0.3;
+                    targetOffsetX = MathHelper.clamp(noiseX * targetWidth * 0.2, -maxOffset * targetWidth, maxOffset * targetWidth);
+                    targetOffsetZ = MathHelper.clamp(noiseZ * targetWidth * 0.2, -maxOffset * targetWidth, maxOffset * targetWidth);
+
                     Vec3d eyePos = client.player.getEyePos();
-                    Vec3d targetPos = target.getPos().add(0, target.getHeight() * 0.5, 0);
+                    Vec3d targetPos = target.getPos().add(targetWidth / 2 + targetOffsetX, targetHeight / 2, targetWidth / 2 + targetOffsetZ);
 
                     double dx = targetPos.x - eyePos.x;
                     double dy = targetPos.y - eyePos.y;
@@ -132,6 +164,14 @@ public class SpeedMod implements ModInitializer {
                         long now2 = System.currentTimeMillis();
                         double delay = MIN_DELAY + (MAX_DELAY - MIN_DELAY) * random.nextDouble();
                         long delayMs = (long) (delay * 1000);
+
+                        if (attacksInSecond >= MAX_ATTACKS_PER_SECOND) {
+                            return;
+                        }
+                        if (random.nextFloat() < MISS_CHANCE) {
+                            return;
+                        }
+
                         if (now2 - lastAttackTime >= delayMs && finalTarget.isAlive()) {
                             if (SPRINT_RESET && client.player.isSprinting()) {
                                 client.player.setSprinting(false);
@@ -139,6 +179,7 @@ public class SpeedMod implements ModInitializer {
                             client.interactionManager.attackEntity(client.player, finalTarget);
                             client.player.swingHand(client.player.getActiveHand());
                             lastAttackTime = now2;
+                            attacksInSecond++;
                         }
                     });
 
