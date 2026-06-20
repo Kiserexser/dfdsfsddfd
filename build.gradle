@@ -1,5 +1,5 @@
 plugins {
-    id 'fabric-loom' version '1.8.7'  // Обновлённая версия для поддержки новых маппингов
+    id 'fabric-loom' version '1.7.4'
     id 'maven-publish'
 }
 
@@ -19,11 +19,10 @@ repositories {
 }
 
 dependencies {
-    minecraft "com.mojang:minecraft:1.21.11"
-    // Актуальные маппинги. Если эта версия не работает, проверь на https://maven.fabricmc.net/net/fabricmc/yarn/
-    mappings "net.fabricmc:yarn:1.21.11+build.1:v2"
+    minecraft "com.mojang:minecraft:1.21.4"
+    mappings "net.fabricmc:yarn:1.21.4+build.1:v2"
     modImplementation "net.fabricmc:fabric-loader:0.15.11"
-    // Fabric API не добавляем – он не нужен
+    // НЕ ДОБАВЛЯЙ FABRIC API – он не нужен
 }
 
 processResources {
