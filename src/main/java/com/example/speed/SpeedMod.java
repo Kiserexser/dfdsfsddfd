@@ -5,6 +5,7 @@ import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.text.Text;
+import net.minecraft.util.Identifier;
 import org.lwjgl.glfw.GLFW;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -12,6 +13,7 @@ import org.slf4j.LoggerFactory;
 public class SpeedMod implements ModInitializer {
     public static final Logger LOGGER = LoggerFactory.getLogger("speedmod");
     private static final MinecraftClient mc = MinecraftClient.getInstance();
+    private static final Identifier INVENTORY_TEXTURE = Identifier.of("textures/gui/container/inventory.png");
 
     private Thread workerThread;
     private volatile boolean running = true;
@@ -55,12 +57,12 @@ public class SpeedMod implements ModInitializer {
 
     // ==================== GUI ====================
     private static class SpeedModGUI extends Screen {
-        private static final int TOTAL_WIDTH = 665;  // новое значение, чтобы поместились окна 129px
+        private static final int TOTAL_WIDTH = 669;
         private static final int TOTAL_HEIGHT = 324;
         private static final int COLS = 5;
         private static final int WINDOW_HEIGHT = 300;
-        private static final int GAP = 5;
-        private static final int WINDOW_WIDTH = 129; // 111 * 1.16 ≈ 129
+        private static final int GAP = 6;
+        private static final int WINDOW_WIDTH = 129;
 
         protected SpeedModGUI() {
             super(Text.literal("SpeedMod GUI"));
@@ -68,9 +70,8 @@ public class SpeedMod implements ModInitializer {
 
         @Override
         public void render(DrawContext context, int mouseX, int mouseY, float delta) {
-            // Не вызываем super.render – это убирает блюр и затемнение фона
+            // Нет затемнения фона
 
-            // Центрируем область
             int centerX = (this.width - TOTAL_WIDTH) / 2;
             int centerY = (this.height - TOTAL_HEIGHT) / 2;
 
@@ -82,23 +83,13 @@ public class SpeedMod implements ModInitializer {
                 int x = centerX + marginLeft + col * (WINDOW_WIDTH + GAP);
                 int y = centerY + marginTop;
 
-                // Белый фон окна
-                context.fill(x, y, x + WINDOW_WIDTH, y + WINDOW_HEIGHT, 0xFFFFFFFF);
-                // Серая рамка
-                context.drawBorder(x, y, WINDOW_WIDTH, WINDOW_HEIGHT, 0xFFAAAAAA);
-
-                // Закругление углов (белые квадраты по углам)
-                int r = 4;
-                context.fill(x, y, x + r, y + r, 0xFFFFFFFF);
-                context.fill(x + WINDOW_WIDTH - r, y, x + WINDOW_WIDTH, y + r, 0xFFFFFFFF);
-                context.fill(x, y + WINDOW_HEIGHT - r, x + r, y + WINDOW_HEIGHT, 0xFFFFFFFF);
-                context.fill(x + WINDOW_WIDTH - r, y + WINDOW_HEIGHT - r, x + WINDOW_WIDTH, y + WINDOW_HEIGHT, 0xFFFFFFFF);
+                context.drawTexture(INVENTORY_TEXTURE, x, y, 0, 0, WINDOW_WIDTH, WINDOW_HEIGHT, 176, 166);
             }
         }
 
         @Override
         public void renderBackground(DrawContext context, int mouseX, int mouseY, float delta) {
-            // Пустой метод – убираем затемнение фона
+            // Пусто – убираем затемнение
         }
 
         @Override
@@ -107,17 +98,33 @@ public class SpeedMod implements ModInitializer {
         }
 
         @Override
-        public void close() {
-            if (client != null) client.setScreen(null);
+        public boolean shouldCloseOnEsc() {
+            return true;
         }
 
+        // === Методы мыши оставлены без переопределения – клики будут обрабатываться GUI (в будущем) ===
+        // Если ничего не переопределять, они просто игнорируются, но не блокируют игру.
+
+        // === Обработка клавиш: только ESC закрывает, остальные идут в игру ===
         @Override
         public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
             if (keyCode == GLFW.GLFW_KEY_ESCAPE) {
                 this.close();
                 return true;
             }
-            return super.keyPressed(keyCode, scanCode, modifiers);
+            // Пропускаем все остальные клавиши (WASD, пробел, Shift, F3 и т.д.) – они будут переданы в игру
+            return false;
+        }
+
+        @Override
+        public boolean keyReleased(int keyCode, int scanCode, int modifiers) {
+            // Отпускание клавиш тоже передаём в игру
+            return false;
+        }
+
+        @Override
+        public void close() {
+            if (client != null) client.setScreen(null);
         }
     }
 }
