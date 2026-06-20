@@ -4,7 +4,9 @@ import net.fabricmc.api.ModInitializer;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.Screen;
+import net.minecraft.client.render.RenderLayer;
 import net.minecraft.text.Text;
+import net.minecraft.util.Identifier;
 import org.lwjgl.glfw.GLFW;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -12,6 +14,7 @@ import org.slf4j.LoggerFactory;
 public class SpeedMod implements ModInitializer {
     public static final Logger LOGGER = LoggerFactory.getLogger("speedmod");
     private static final MinecraftClient mc = MinecraftClient.getInstance();
+    private static final Identifier INVENTORY_TEXTURE = Identifier.of("textures/gui/container/inventory.png");
 
     private Thread workerThread;
     private volatile boolean running = true;
@@ -81,15 +84,8 @@ public class SpeedMod implements ModInitializer {
                 int x = centerX + marginLeft + col * (WINDOW_WIDTH + GAP);
                 int y = centerY + marginTop;
 
-                // Белый фон окна
-                context.fill(x, y, x + WINDOW_WIDTH, y + WINDOW_HEIGHT, 0xFFFFFFFF);
-
-                // Закругление углов (белые квадраты по углам)
-                int r = 8;
-                context.fill(x, y, x + r, y + r, 0xFFFFFFFF);
-                context.fill(x + WINDOW_WIDTH - r, y, x + WINDOW_WIDTH, y + r, 0xFFFFFFFF);
-                context.fill(x, y + WINDOW_HEIGHT - r, x + r, y + WINDOW_HEIGHT, 0xFFFFFFFF);
-                context.fill(x + WINDOW_WIDTH - r, y + WINDOW_HEIGHT - r, x + WINDOW_WIDTH, y + WINDOW_HEIGHT, 0xFFFFFFFF);
+                // Рисуем панель инвентаря с закруглёнными углами
+                context.drawTexture(RenderLayer::getGuiTextured, INVENTORY_TEXTURE, x, y, 0, 0, WINDOW_WIDTH, WINDOW_HEIGHT, 176, 166);
             }
         }
 
@@ -124,7 +120,6 @@ public class SpeedMod implements ModInitializer {
         }
 
         // === Мышь не блокируется – клики будут обрабатываться в будущем ===
-        // (ничего не переопределяем)
 
         @Override
         public void close() {
