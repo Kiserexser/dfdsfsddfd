@@ -23,10 +23,10 @@ dependencies {
     mappings "net.fabricmc:yarn:1.21.4+build.1:v2"
     modImplementation "net.fabricmc:fabric-loader:0.15.11"
     
-    // Добавлен Fabric API
-    modImplementation "net.fabricmc.fabric-api:fabric-api:0.102.0+1.21.4"
+    // Исправленная версия Fabric API (существует)
+    modImplementation "net.fabricmc.fabric-api:fabric-api:0.100.0+1.21.4"
 
-    // Если миксины не нужны, удали эти строки:
+    // Миксины (если нужны – раскомментируй)
     // modImplementation "net.fabricmc:sponge-mixin:0.12.5+mixin.0.8.5"
     // include "net.fabricmc:sponge-mixin:0.12.5+mixin.0.8.5"
 }
@@ -43,8 +43,6 @@ tasks.withType(JavaCompile).configureEach {
 }
 
 java {
-    // Убираем withSourcesJar() – он не нужен для уменьшения размера
-    // withSourcesJar()
     sourceCompatibility = JavaVersion.VERSION_21
     targetCompatibility = JavaVersion.VERSION_21
 }
