@@ -5,7 +5,6 @@ import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.text.Text;
-import net.minecraft.util.Identifier;
 import org.lwjgl.glfw.GLFW;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -13,7 +12,6 @@ import org.slf4j.LoggerFactory;
 public class SpeedMod implements ModInitializer {
     public static final Logger LOGGER = LoggerFactory.getLogger("speedmod");
     private static final MinecraftClient mc = MinecraftClient.getInstance();
-    private static final Identifier INVENTORY_TEXTURE = Identifier.of("textures/gui/container/inventory.png");
 
     private Thread workerThread;
     private volatile boolean running = true;
@@ -83,7 +81,15 @@ public class SpeedMod implements ModInitializer {
                 int x = centerX + marginLeft + col * (WINDOW_WIDTH + GAP);
                 int y = centerY + marginTop;
 
-                context.drawTexture(INVENTORY_TEXTURE, x, y, 0, 0, WINDOW_WIDTH, WINDOW_HEIGHT, 176, 166);
+                // Белый фон окна
+                context.fill(x, y, x + WINDOW_WIDTH, y + WINDOW_HEIGHT, 0xFFFFFFFF);
+
+                // Закругление углов (белые квадраты по углам)
+                int r = 8;
+                context.fill(x, y, x + r, y + r, 0xFFFFFFFF);
+                context.fill(x + WINDOW_WIDTH - r, y, x + WINDOW_WIDTH, y + r, 0xFFFFFFFF);
+                context.fill(x, y + WINDOW_HEIGHT - r, x + r, y + WINDOW_HEIGHT, 0xFFFFFFFF);
+                context.fill(x + WINDOW_WIDTH - r, y + WINDOW_HEIGHT - r, x + WINDOW_WIDTH, y + WINDOW_HEIGHT, 0xFFFFFFFF);
             }
         }
 
@@ -102,25 +108,23 @@ public class SpeedMod implements ModInitializer {
             return true;
         }
 
-        // === Методы мыши оставлены без переопределения – клики будут обрабатываться GUI (в будущем) ===
-        // Если ничего не переопределять, они просто игнорируются, но не блокируют игру.
-
-        // === Обработка клавиш: только ESC закрывает, остальные идут в игру ===
+        // === Клавиши: ESC закрывает, остальные идут в игру ===
         @Override
         public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
             if (keyCode == GLFW.GLFW_KEY_ESCAPE) {
                 this.close();
                 return true;
             }
-            // Пропускаем все остальные клавиши (WASD, пробел, Shift, F3 и т.д.) – они будут переданы в игру
-            return false;
+            return false; // пропускаем в игру
         }
 
         @Override
         public boolean keyReleased(int keyCode, int scanCode, int modifiers) {
-            // Отпускание клавиш тоже передаём в игру
-            return false;
+            return false; // пропускаем в игру
         }
+
+        // === Мышь не блокируется – клики будут обрабатываться в будущем ===
+        // (ничего не переопределяем)
 
         @Override
         public void close() {
