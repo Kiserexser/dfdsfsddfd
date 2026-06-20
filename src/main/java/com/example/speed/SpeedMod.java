@@ -56,7 +56,6 @@ public class SpeedMod implements ModInitializer {
         workerThread.start();
     }
 
-    // ==================== GUI ====================
     private static class SpeedModGUI extends Screen {
         private static final int TOTAL_WIDTH = 669;
         private static final int TOTAL_HEIGHT = 324;
@@ -82,25 +81,20 @@ public class SpeedMod implements ModInitializer {
                 int x = centerX + marginLeft + col * (WINDOW_WIDTH + GAP);
                 int y = centerY + marginTop;
 
-                // Рисуем текстуру кнопки (белый фон + закруглённые углы)
                 context.drawTexture(RenderLayer::getGuiTextured, WIDGET_TEXTURE, x, y, 0, 0, WINDOW_WIDTH, WINDOW_HEIGHT, 256, 256);
             }
         }
 
         @Override
         public void renderBackground(DrawContext context, int mouseX, int mouseY, float delta) {
-            // Пусто – убираем затемнение
+            // прозрачный фон
         }
 
         @Override
-        public boolean shouldPause() {
-            return false;
-        }
+        public boolean shouldPause() { return false; }
 
         @Override
-        public boolean shouldCloseOnEsc() {
-            return true;
-        }
+        public boolean shouldCloseOnEsc() { return true; }
 
         @Override
         public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
@@ -112,9 +106,7 @@ public class SpeedMod implements ModInitializer {
         }
 
         @Override
-        public boolean keyReleased(int keyCode, int scanCode, int modifiers) {
-            return false;
-        }
+        public boolean keyReleased(int keyCode, int scanCode, int modifiers) { return false; }
 
         @Override
         public void close() {
