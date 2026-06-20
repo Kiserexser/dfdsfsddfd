@@ -14,7 +14,7 @@ import org.slf4j.LoggerFactory;
 public class SpeedMod implements ModInitializer {
     public static final Logger LOGGER = LoggerFactory.getLogger("speedmod");
     private static final MinecraftClient mc = MinecraftClient.getInstance();
-    private static final Identifier INVENTORY_TEXTURE = Identifier.of("textures/gui/container/inventory.png");
+    private static final Identifier WIDGET_TEXTURE = Identifier.of("textures/gui/widget.png");
 
     private Thread workerThread;
     private volatile boolean running = true;
@@ -71,8 +71,6 @@ public class SpeedMod implements ModInitializer {
 
         @Override
         public void render(DrawContext context, int mouseX, int mouseY, float delta) {
-            // Нет затемнения фона
-
             int centerX = (this.width - TOTAL_WIDTH) / 2;
             int centerY = (this.height - TOTAL_HEIGHT) / 2;
 
@@ -84,8 +82,8 @@ public class SpeedMod implements ModInitializer {
                 int x = centerX + marginLeft + col * (WINDOW_WIDTH + GAP);
                 int y = centerY + marginTop;
 
-                // Рисуем панель инвентаря с закруглёнными углами
-                context.drawTexture(RenderLayer::getGuiTextured, INVENTORY_TEXTURE, x, y, 0, 0, WINDOW_WIDTH, WINDOW_HEIGHT, 176, 166);
+                // Рисуем текстуру кнопки (белый фон + закруглённые углы)
+                context.drawTexture(RenderLayer::getGuiTextured, WIDGET_TEXTURE, x, y, 0, 0, WINDOW_WIDTH, WINDOW_HEIGHT, 256, 256);
             }
         }
 
@@ -104,22 +102,19 @@ public class SpeedMod implements ModInitializer {
             return true;
         }
 
-        // === Клавиши: ESC закрывает, остальные идут в игру ===
         @Override
         public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
             if (keyCode == GLFW.GLFW_KEY_ESCAPE) {
                 this.close();
                 return true;
             }
-            return false; // пропускаем в игру
+            return false;
         }
 
         @Override
         public boolean keyReleased(int keyCode, int scanCode, int modifiers) {
-            return false; // пропускаем в игру
+            return false;
         }
-
-        // === Мышь не блокируется – клики будут обрабатываться в будущем ===
 
         @Override
         public void close() {
