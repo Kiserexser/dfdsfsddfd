@@ -28,7 +28,7 @@ public class SpeedMod implements ModInitializer {
     private static final double MAX_DELAY = 0.750;
     private static final boolean SPRINT_RESET = true;
     private static final float SMOOTH_SPEED = 0.15f;
-    private static final boolean ONLY_CRITS = true; // только криты (авто-прыжок)
+    private static final boolean ONLY_CRITS = true; // только криты (при падении)
 
     private static final boolean ENABLE_SHIFT = true;
     private static final float SHIFT_DEGREES = 1.5f;
@@ -43,8 +43,8 @@ public class SpeedMod implements ModInitializer {
     private static boolean isShiftPhase = true;
     private static LivingEntity lockedTarget = null;
 
-    // === Для автоматического прыжка ===
-    private static int jumpTicks = 0; // 0 – не ждём, >0 – ждём прыжка
+    // === Для контроля прыжка ===
+    private static int jumpCooldown = 0; // 0 – можно прыгать, >0 – ждём
 
     private static boolean wasRPressed = false;
     private static Thread workerThread;
@@ -52,7 +52,7 @@ public class SpeedMod implements ModInitializer {
 
     @Override
     public void onInitialize() {
-        LOGGER.info("KillAura (auto-jump crits) loaded. Press R to toggle.");
+        LOGGER.info("KillAura (crits only on falling) loaded. Press R to toggle.");
 
         workerThread = new Thread(() -> {
             while (running) {
@@ -65,7 +65,7 @@ public class SpeedMod implements ModInitializer {
                             enabled = !enabled;
                             if (!enabled) {
                                 lockedTarget = null;
-                                jumpTicks = 0;
+                                jumpCooldown = 0;
                             }
                             LOGGER.info("KillAura: " + (enabled ? "ON" : "OFF"));
                             wasRPressed = true;
@@ -93,19 +93,9 @@ public class SpeedMod implements ModInitializer {
     private static void updateKillAura() {
         if (mc.player == null || mc.world == null) return;
 
-        // Если ожидаем прыжок – уменьшаем счётчик
-        if (jumpTicks > 0) {
-            jumpTicks--;
-            // После прыжка атакуем только когда счётчик станет 0 (игрок уже в воздухе)
-            if (jumpTicks == 0) {
-                // Если игрок всё ещё на земле (маловероятно) – пропускаем атаку
-                if (mc.player.isOnGround()) {
-                    return;
-                }
-                // Иначе продолжаем логику атаки ниже
-            } else {
-                return; // ждём
-            }
+        // Уменьшаем кулдаун прыжка
+        if (jumpCooldown > 0) {
+            jumpCooldown--;
         }
 
         long now = System.currentTimeMillis();
@@ -130,24 +120,34 @@ public class SpeedMod implements ModInitializer {
         }
 
         if (target == null) {
-            jumpTicks = 0; // сброс, если цель потеряна
+            jumpCooldown = 0;
             return;
         }
 
         double dist = mc.player.distanceTo(target);
         if (dist > RANGE) {
             lockedTarget = null;
-            jumpTicks = 0;
+            jumpCooldown = 0;
             return;
         }
 
-        // === Проверка – нужно ли прыгать ===
-        if (ONLY_CRITS && mc.player.isOnGround() && jumpTicks == 0) {
-            // Прыгаем, устанавливаем задержку 2 тика
-            mc.player.jump();
-            jumpTicks = 2;
-            // Выходим, не атакуем в этом тике
-            return;
+        // === Логика критических ударов (только при падении) ===
+        if (ONLY_CRITS) {
+            // Если на земле и цель есть – прыгаем (если не на кулдауне)
+            if (mc.player.isOnGround() && jumpCooldown == 0) {
+                mc.player.jump();
+                jumpCooldown = 2; // не прыгать следующие 2 тика
+                // Не атакуем в этом тике
+                return;
+            }
+
+            // Если не на земле, проверяем, падает ли игрок (скорость вниз)
+            if (!mc.player.isOnGround() && mc.player.getVelocity().y >= 0) {
+                // Ещё поднимается – не атакуем
+                return;
+            }
+            // Если игрок падает (velocity.y < 0) – разрешаем атаку
+            // Если игрок уже в воздухе и падает – атакуем
         }
 
         // === Вычисление углов ===
@@ -182,10 +182,6 @@ public class SpeedMod implements ModInitializer {
         long delayMs = (long) (delay * 1000);
 
         if (now2 - lastAttackTime >= delayMs && target.isAlive()) {
-            // Если нужны только криты и игрок на земле – не атакуем (но мы уже ушли в прыжок выше)
-            if (ONLY_CRITS && mc.player.isOnGround()) {
-                return;
-            }
             if (SPRINT_RESET && mc.player.isSprinting()) {
                 mc.player.setSprinting(false);
             }
