@@ -20,15 +20,12 @@ public class SpeedMod implements ModInitializer {
 
     private static boolean enabled = false;
     private static final Random random = new Random();
-    private static long lastAttackTime = 0;
 
     // === Настройки ===
     private static final double RANGE = 4.5;
-    private static final double MIN_DELAY = 0.690;
-    private static final double MAX_DELAY = 0.750;
     private static final boolean SPRINT_RESET = true;
     private static final float SMOOTH_SPEED = 0.15f;
-    private static final boolean ONLY_CRITS = true; // только криты (при падении)
+    private static final boolean ONLY_CRITS = true;
 
     private static final boolean ENABLE_SHIFT = true;
     private static final float SHIFT_DEGREES = 1.5f;
@@ -43,8 +40,12 @@ public class SpeedMod implements ModInitializer {
     private static boolean isShiftPhase = true;
     private static LivingEntity lockedTarget = null;
 
-    // === Для контроля прыжка ===
-    private static int jumpCooldown = 0; // 0 – можно прыгать, >0 – ждём
+    // === Контроль прыжка и удара ===
+    private static long lastJumpTime = 0;           // время последнего прыжка
+    private static long lastLandTime = 0;           // время последнего приземления
+    private static long jumpStartTime = 0;          // время начала прыжка (для отсчёта 290 мс)
+    private static boolean hasJumped = false;       // флаг, что прыжок совершён и ждём удар
+    private static boolean hasAttacked = false;     // флаг, что удар уже нанесён в текущем цикле
 
     private static boolean wasRPressed = false;
     private static Thread workerThread;
@@ -52,7 +53,7 @@ public class SpeedMod implements ModInitializer {
 
     @Override
     public void onInitialize() {
-        LOGGER.info("KillAura (crits only on falling) loaded. Press R to toggle.");
+        LOGGER.info("KillAura (auto-jump with 290ms delay, 50ms post-land delay) loaded. Press R to toggle.");
 
         workerThread = new Thread(() -> {
             while (running) {
@@ -65,7 +66,7 @@ public class SpeedMod implements ModInitializer {
                             enabled = !enabled;
                             if (!enabled) {
                                 lockedTarget = null;
-                                jumpCooldown = 0;
+                                resetState();
                             }
                             LOGGER.info("KillAura: " + (enabled ? "ON" : "OFF"));
                             wasRPressed = true;
@@ -90,24 +91,35 @@ public class SpeedMod implements ModInitializer {
         workerThread.start();
     }
 
+    private static void resetState() {
+        hasJumped = false;
+        hasAttacked = false;
+        jumpStartTime = 0;
+        lastJumpTime = 0;
+        lastLandTime = 0;
+    }
+
     private static void updateKillAura() {
         if (mc.player == null || mc.world == null) return;
 
-        // Уменьшаем кулдаун прыжка
-        if (jumpCooldown > 0) {
-            jumpCooldown--;
+        // Отключаем спринт
+        if (ONLY_CRITS && mc.player.isSprinting()) {
+            mc.player.setSprinting(false);
         }
 
         long now = System.currentTimeMillis();
-        long elapsed = now - shiftCycleStart;
-        if (isShiftPhase && elapsed >= SHIFT_DURATION_MS) {
+
+        // === Обновление фазы смещения ===
+        long elapsedShift = now - shiftCycleStart;
+        if (isShiftPhase && elapsedShift >= SHIFT_DURATION_MS) {
             isShiftPhase = false;
             shiftCycleStart = now;
-        } else if (!isShiftPhase && elapsed >= RETURN_DURATION_MS) {
+        } else if (!isShiftPhase && elapsedShift >= RETURN_DURATION_MS) {
             isShiftPhase = true;
             shiftCycleStart = now;
         }
 
+        // === Выбор цели ===
         LivingEntity target = null;
         if (lockedTarget != null && lockedTarget.isAlive() && !lockedTarget.isDead()) {
             double dist = mc.player.distanceTo(lockedTarget);
@@ -119,76 +131,95 @@ public class SpeedMod implements ModInitializer {
             target = lockedTarget;
         }
 
-        if (target == null) {
-            jumpCooldown = 0;
+        // === Наведение (всегда) ===
+        if (target != null) {
+            double dist = mc.player.distanceTo(target);
+            if (dist <= RANGE) {
+                Vec3d eyePos = mc.player.getEyePos();
+                Vec3d targetPos = target.getPos().add(0, target.getHeight() * 0.5, 0);
+
+                double dx = targetPos.x - eyePos.x;
+                double dy = targetPos.y - eyePos.y;
+                double dz = targetPos.z - eyePos.z;
+                double distance = Math.sqrt(dx * dx + dz * dz);
+                float yaw = (float) MathHelper.atan2(dz, dx) * (180F / (float) Math.PI) - 90F;
+                float pitch = (float) -MathHelper.atan2(dy, distance) * (180F / (float) Math.PI);
+
+                float jitterYaw = (random.nextFloat() - 0.5f) * JITTER_RANGE * 2;
+                float jitterPitch = (random.nextFloat() - 0.5f) * JITTER_RANGE * 2;
+                float shift = 0f;
+                if (ENABLE_SHIFT && isShiftPhase) shift = SHIFT_DEGREES;
+
+                targetYaw = yaw + jitterYaw;
+                targetPitch = pitch + jitterPitch + shift;
+
+                float currentYaw = mc.player.getYaw();
+                float currentPitch = mc.player.getPitch();
+                float newYaw = lerpAngle(currentYaw, targetYaw, SMOOTH_SPEED);
+                float newPitch = lerpAngle(currentPitch, targetPitch, SMOOTH_SPEED);
+                mc.player.setYaw(newYaw);
+                mc.player.setPitch(newPitch);
+            } else {
+                lockedTarget = null;
+            }
+        }
+
+        // Если нет цели – выходим
+        if (target == null || mc.player.distanceTo(target) > RANGE) {
             return;
         }
 
-        double dist = mc.player.distanceTo(target);
-        if (dist > RANGE) {
-            lockedTarget = null;
-            jumpCooldown = 0;
+        // === Логика прыжка и удара ===
+
+        // Если игрок на земле – обновляем время приземления
+        if (mc.player.isOnGround()) {
+            if (lastLandTime == 0) {
+                lastLandTime = now;
+            }
+            // Если игрок на земле и был флаг hasJumped, но мы уже приземлились – сбрасываем состояние
+            if (hasJumped) {
+                resetState();
+                lastLandTime = now;
+            }
+        } else {
+            // если в воздухе – сбрасываем lastLandTime, чтобы после приземления засчитать
+            lastLandTime = 0;
+        }
+
+        // Проверка возможности прыжка:
+        // - на земле
+        // - прошло 50 мс с момента приземления (чтобы не прыгать сразу)
+        // - прошло более 1 секунды с последнего прыжка (не обязательно, можно убрать, но оставим)
+        if (mc.player.isOnGround() && !hasJumped && (now - lastLandTime >= 50) && (now - lastJumpTime >= 1000)) {
+            // Прыгаем
+            mc.player.jump();
+            lastJumpTime = now;
+            jumpStartTime = now;
+            hasJumped = true;
+            hasAttacked = false;
+            // после прыжка выходим, не атакуем в этом тике
             return;
         }
 
-        // === Логика критических ударов (только при падении) ===
-        if (ONLY_CRITS) {
-            // Если на земле и цель есть – прыгаем (если не на кулдауне)
-            if (mc.player.isOnGround() && jumpCooldown == 0) {
-                mc.player.jump();
-                jumpCooldown = 2; // не прыгать следующие 2 тика
-                // Не атакуем в этом тике
-                return;
+        // Если мы в прыжке и ещё не атаковали, проверяем условия для удара
+        if (hasJumped && !hasAttacked) {
+            // Прошло ли 290 мс с начала прыжка?
+            if (now - jumpStartTime >= 290) {
+                // Проверяем, что игрок в воздухе и падает (velocity.y < 0)
+                if (!mc.player.isOnGround() && mc.player.getVelocity().y < 0) {
+                    // Наносим удар
+                    mc.interactionManager.attackEntity(mc.player, target);
+                    mc.player.swingHand(mc.player.getActiveHand());
+                    hasAttacked = true;
+                    // После удара, ждём пока приземлится, затем будет задержка 50 мс перед следующим прыжком
+                    // Сбрасываем hasJumped? Нет, оставим, чтобы не прыгать повторно до приземления.
+                    // При приземлении сбросится в блоке выше.
+                }
             }
-
-            // Если не на земле, проверяем, падает ли игрок (скорость вниз)
-            if (!mc.player.isOnGround() && mc.player.getVelocity().y >= 0) {
-                // Ещё поднимается – не атакуем
-                return;
-            }
-            // Если игрок падает (velocity.y < 0) – разрешаем атаку
-            // Если игрок уже в воздухе и падает – атакуем
         }
 
-        // === Вычисление углов ===
-        Vec3d eyePos = mc.player.getEyePos();
-        Vec3d targetPos = target.getPos().add(0, target.getHeight() * 0.5, 0);
-
-        double dx = targetPos.x - eyePos.x;
-        double dy = targetPos.y - eyePos.y;
-        double dz = targetPos.z - eyePos.z;
-        double distance = Math.sqrt(dx * dx + dz * dz);
-        float yaw = (float) MathHelper.atan2(dz, dx) * (180F / (float) Math.PI) - 90F;
-        float pitch = (float) -MathHelper.atan2(dy, distance) * (180F / (float) Math.PI);
-
-        float jitterYaw = (random.nextFloat() - 0.5f) * JITTER_RANGE * 2;
-        float jitterPitch = (random.nextFloat() - 0.5f) * JITTER_RANGE * 2;
-        float shift = 0f;
-        if (ENABLE_SHIFT && isShiftPhase) shift = SHIFT_DEGREES;
-
-        targetYaw = yaw + jitterYaw;
-        targetPitch = pitch + jitterPitch + shift;
-
-        float currentYaw = mc.player.getYaw();
-        float currentPitch = mc.player.getPitch();
-        float newYaw = lerpAngle(currentYaw, targetYaw, SMOOTH_SPEED);
-        float newPitch = lerpAngle(currentPitch, targetPitch, SMOOTH_SPEED);
-        mc.player.setYaw(newYaw);
-        mc.player.setPitch(newPitch);
-
-        // === Атака ===
-        long now2 = System.currentTimeMillis();
-        double delay = MIN_DELAY + (MAX_DELAY - MIN_DELAY) * random.nextDouble();
-        long delayMs = (long) (delay * 1000);
-
-        if (now2 - lastAttackTime >= delayMs && target.isAlive()) {
-            if (SPRINT_RESET && mc.player.isSprinting()) {
-                mc.player.setSprinting(false);
-            }
-            mc.interactionManager.attackEntity(mc.player, target);
-            mc.player.swingHand(mc.player.getActiveHand());
-            lastAttackTime = now2;
-        }
+        // Если мы уже атаковали, но всё ещё в воздухе – ничего не делаем, ждём приземления.
+        // При приземлении сбросится hasJumped.
     }
 
     private static LivingEntity getTarget() {
