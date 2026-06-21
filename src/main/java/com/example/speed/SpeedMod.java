@@ -28,15 +28,14 @@ public class SpeedMod implements ModInitializer {
     private static final double MAX_DELAY = 0.750;
     private static final boolean SPRINT_RESET = true;
     private static final float SMOOTH_SPEED = 0.15f;
+    private static final boolean ONLY_CRITS = true; // только криты (авто-прыжок)
 
-    // === Смещение (Shift) ===
     private static final boolean ENABLE_SHIFT = true;
-    private static final float SHIFT_DEGREES = 1.5f;   // изменено с 0.5 на 1.5
+    private static final float SHIFT_DEGREES = 1.5f;
     private static final long SHIFT_DURATION_MS = 3000;
     private static final long RETURN_DURATION_MS = 2000;
 
-    // === Джиттер ===
-    private static final float JITTER_RANGE = 0.35f;    // изменено с 0.15 на 0.35
+    private static final float JITTER_RANGE = 0.35f;
 
     private static float targetYaw = 0;
     private static float targetPitch = 0;
@@ -44,13 +43,16 @@ public class SpeedMod implements ModInitializer {
     private static boolean isShiftPhase = true;
     private static LivingEntity lockedTarget = null;
 
+    // === Для автоматического прыжка ===
+    private static int jumpTicks = 0; // 0 – не ждём, >0 – ждём прыжка
+
     private static boolean wasRPressed = false;
     private static Thread workerThread;
     private static volatile boolean running = true;
 
     @Override
     public void onInitialize() {
-        LOGGER.info("KillAura loaded. Press R to toggle.");
+        LOGGER.info("KillAura (auto-jump crits) loaded. Press R to toggle.");
 
         workerThread = new Thread(() -> {
             while (running) {
@@ -61,7 +63,10 @@ public class SpeedMod implements ModInitializer {
 
                         if (rPressed && !wasRPressed) {
                             enabled = !enabled;
-                            if (!enabled) lockedTarget = null;
+                            if (!enabled) {
+                                lockedTarget = null;
+                                jumpTicks = 0;
+                            }
                             LOGGER.info("KillAura: " + (enabled ? "ON" : "OFF"));
                             wasRPressed = true;
                         } else if (!rPressed) {
@@ -88,6 +93,21 @@ public class SpeedMod implements ModInitializer {
     private static void updateKillAura() {
         if (mc.player == null || mc.world == null) return;
 
+        // Если ожидаем прыжок – уменьшаем счётчик
+        if (jumpTicks > 0) {
+            jumpTicks--;
+            // После прыжка атакуем только когда счётчик станет 0 (игрок уже в воздухе)
+            if (jumpTicks == 0) {
+                // Если игрок всё ещё на земле (маловероятно) – пропускаем атаку
+                if (mc.player.isOnGround()) {
+                    return;
+                }
+                // Иначе продолжаем логику атаки ниже
+            } else {
+                return; // ждём
+            }
+        }
+
         long now = System.currentTimeMillis();
         long elapsed = now - shiftCycleStart;
         if (isShiftPhase && elapsed >= SHIFT_DURATION_MS) {
@@ -109,14 +129,28 @@ public class SpeedMod implements ModInitializer {
             target = lockedTarget;
         }
 
-        if (target == null) return;
+        if (target == null) {
+            jumpTicks = 0; // сброс, если цель потеряна
+            return;
+        }
 
         double dist = mc.player.distanceTo(target);
         if (dist > RANGE) {
             lockedTarget = null;
+            jumpTicks = 0;
             return;
         }
 
+        // === Проверка – нужно ли прыгать ===
+        if (ONLY_CRITS && mc.player.isOnGround() && jumpTicks == 0) {
+            // Прыгаем, устанавливаем задержку 2 тика
+            mc.player.jump();
+            jumpTicks = 2;
+            // Выходим, не атакуем в этом тике
+            return;
+        }
+
+        // === Вычисление углов ===
         Vec3d eyePos = mc.player.getEyePos();
         Vec3d targetPos = target.getPos().add(0, target.getHeight() * 0.5, 0);
 
@@ -142,11 +176,16 @@ public class SpeedMod implements ModInitializer {
         mc.player.setYaw(newYaw);
         mc.player.setPitch(newPitch);
 
+        // === Атака ===
         long now2 = System.currentTimeMillis();
         double delay = MIN_DELAY + (MAX_DELAY - MIN_DELAY) * random.nextDouble();
         long delayMs = (long) (delay * 1000);
 
         if (now2 - lastAttackTime >= delayMs && target.isAlive()) {
+            // Если нужны только криты и игрок на земле – не атакуем (но мы уже ушли в прыжок выше)
+            if (ONLY_CRITS && mc.player.isOnGround()) {
+                return;
+            }
             if (SPRINT_RESET && mc.player.isSprinting()) {
                 mc.player.setSprinting(false);
             }
