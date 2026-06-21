@@ -79,8 +79,6 @@ public class SpeedMod implements ModInitializer {
 
         // Проверка – если на земле, выходим (как в оригинале)
         if (mc.player.isOnGround()) {
-            // Можно сбросить состояние, чтобы не было глюков
-            // resetState();
             return;
         }
 
@@ -107,7 +105,6 @@ public class SpeedMod implements ModInitializer {
                     if (deltaY > 0 || vulcanResetCnt > 1) {
                         motionY = -deltaY;
                     } else {
-                        // если условия не выполнены – выходим
                         return;
                     }
                     vulcanSwitch = true;
@@ -116,9 +113,9 @@ public class SpeedMod implements ModInitializer {
                 }
                 break;
             case 2:
-                // Отправляем фейковый пакет StatusOnly(false)
+                // Исправлено: два параметра
                 if (mc.player.networkHandler != null) {
-                    mc.player.networkHandler.sendPacket(new PlayerMoveC2SPacket.OnGroundOnly(false));
+                    mc.player.networkHandler.sendPacket(new PlayerMoveC2SPacket.OnGroundOnly(false, false));
                 }
                 break;
             case 3:
@@ -135,7 +132,6 @@ public class SpeedMod implements ModInitializer {
                 break;
             case 4:
                 vulcanSwitch = !vulcanSwitch;
-                // Устанавливаем ground в зависимости от состояния (мы не можем вызвать setGround, просто игнорируем)
                 motionX = lastMotionX * 0.88;
                 if (downwards) {
                     motionY = vulcanSwitch ? -0.097000002 : -0.147000003;
@@ -157,15 +153,11 @@ public class SpeedMod implements ModInitializer {
 
         // Применяем скорость
         mc.player.setVelocity(motionX, motionY, motionZ);
-        // В оригинале был lerpMotion, мы просто присваиваем
     }
 
     private static double getFloorHeight(double currentY) {
-        // Имитация PositionHelper.getMathHeight(Face.DOWN, currentY, 0.015625)
-        // Просто округляем вниз до ближайшего блока с шагом 0.015625
         double step = 0.015625;
         double floor = Math.floor(currentY / step) * step;
-        // Если разница меньше step, возвращаем floor
         return floor;
     }
 }
