@@ -21,7 +21,6 @@ public class SpeedMod implements ModInitializer {
     private static boolean enabled = false;
     private static final Random random = new Random();
 
-    // === Настройки ===
     private static final double RANGE = 4.5;
     private static final boolean SPRINT_RESET = true;
     private static final float SMOOTH_SPEED = 0.15f;
@@ -31,7 +30,6 @@ public class SpeedMod implements ModInitializer {
     private static final float SHIFT_DEGREES = 1.5f;
     private static final long SHIFT_DURATION_MS = 3000;
     private static final long RETURN_DURATION_MS = 2000;
-
     private static final float JITTER_RANGE = 0.35f;
 
     private static float targetYaw = 0;
@@ -40,12 +38,17 @@ public class SpeedMod implements ModInitializer {
     private static boolean isShiftPhase = true;
     private static LivingEntity lockedTarget = null;
 
-    // === Контроль прыжка и удара ===
-    private static long lastJumpTime = 0;           // время последнего прыжка
-    private static long lastLandTime = 0;           // время последнего приземления
-    private static long jumpStartTime = 0;          // время начала прыжка (для отсчёта 290 мс)
-    private static boolean hasJumped = false;       // флаг, что прыжок совершён и ждём удар
-    private static boolean hasAttacked = false;     // флаг, что удар уже нанесён в текущем цикле
+    // === Состояния автомата ===
+    private static final int STATE_READY = 0;
+    private static final int STATE_JUMPING = 1;
+    private static final int STATE_ATTACKED = 2;
+
+    private static int state = STATE_READY;
+    private static long jumpStartTime = 0;
+    private static long lastLandTime = 0;
+
+    private static final long POST_JUMP_DELAY = 290;   // 290 мс (как ты просил)
+    private static final long POST_LAND_DELAY = 50;    // 50 мс после приземления
 
     private static boolean wasRPressed = false;
     private static Thread workerThread;
@@ -53,7 +56,7 @@ public class SpeedMod implements ModInitializer {
 
     @Override
     public void onInitialize() {
-        LOGGER.info("KillAura (auto-jump with 290ms delay, 50ms post-land delay) loaded. Press R to toggle.");
+        LOGGER.info("KillAura (auto-jump with 290ms delay, 50ms post-land) loaded. Press R to toggle.");
 
         workerThread = new Thread(() -> {
             while (running) {
@@ -66,7 +69,9 @@ public class SpeedMod implements ModInitializer {
                             enabled = !enabled;
                             if (!enabled) {
                                 lockedTarget = null;
-                                resetState();
+                                state = STATE_READY;
+                                jumpStartTime = 0;
+                                lastLandTime = 0;
                             }
                             LOGGER.info("KillAura: " + (enabled ? "ON" : "OFF"));
                             wasRPressed = true;
@@ -91,14 +96,6 @@ public class SpeedMod implements ModInitializer {
         workerThread.start();
     }
 
-    private static void resetState() {
-        hasJumped = false;
-        hasAttacked = false;
-        jumpStartTime = 0;
-        lastJumpTime = 0;
-        lastLandTime = 0;
-    }
-
     private static void updateKillAura() {
         if (mc.player == null || mc.world == null) return;
 
@@ -109,7 +106,7 @@ public class SpeedMod implements ModInitializer {
 
         long now = System.currentTimeMillis();
 
-        // === Обновление фазы смещения ===
+        // === Смещение ===
         long elapsedShift = now - shiftCycleStart;
         if (isShiftPhase && elapsedShift >= SHIFT_DURATION_MS) {
             isShiftPhase = false;
@@ -164,62 +161,41 @@ public class SpeedMod implements ModInitializer {
             }
         }
 
-        // Если нет цели – выходим
-        if (target == null || mc.player.distanceTo(target) > RANGE) {
-            return;
-        }
+        if (target == null || mc.player.distanceTo(target) > RANGE) return;
 
-        // === Логика прыжка и удара ===
-
-        // Если игрок на земле – обновляем время приземления
-        if (mc.player.isOnGround()) {
-            if (lastLandTime == 0) {
-                lastLandTime = now;
-            }
-            // Если игрок на земле и был флаг hasJumped, но мы уже приземлились – сбрасываем состояние
-            if (hasJumped) {
-                resetState();
-                lastLandTime = now;
-            }
-        } else {
-            // если в воздухе – сбрасываем lastLandTime, чтобы после приземления засчитать
-            lastLandTime = 0;
-        }
-
-        // Проверка возможности прыжка:
-        // - на земле
-        // - прошло 50 мс с момента приземления (чтобы не прыгать сразу)
-        // - прошло более 1 секунды с последнего прыжка (не обязательно, можно убрать, но оставим)
-        if (mc.player.isOnGround() && !hasJumped && (now - lastLandTime >= 50) && (now - lastJumpTime >= 1000)) {
-            // Прыгаем
-            mc.player.jump();
-            lastJumpTime = now;
-            jumpStartTime = now;
-            hasJumped = true;
-            hasAttacked = false;
-            // после прыжка выходим, не атакуем в этом тике
-            return;
-        }
-
-        // Если мы в прыжке и ещё не атаковали, проверяем условия для удара
-        if (hasJumped && !hasAttacked) {
-            // Прошло ли 290 мс с начала прыжка?
-            if (now - jumpStartTime >= 290) {
-                // Проверяем, что игрок в воздухе и падает (velocity.y < 0)
-                if (!mc.player.isOnGround() && mc.player.getVelocity().y < 0) {
-                    // Наносим удар
-                    mc.interactionManager.attackEntity(mc.player, target);
-                    mc.player.swingHand(mc.player.getActiveHand());
-                    hasAttacked = true;
-                    // После удара, ждём пока приземлится, затем будет задержка 50 мс перед следующим прыжком
-                    // Сбрасываем hasJumped? Нет, оставим, чтобы не прыгать повторно до приземления.
-                    // При приземлении сбросится в блоке выше.
+        // === Автомат состояний ===
+        switch (state) {
+            case STATE_READY:
+                if (mc.player.isOnGround()) {
+                    if (lastLandTime == 0) lastLandTime = now;
+                    if (now - lastLandTime >= POST_LAND_DELAY) {
+                        mc.player.jump();
+                        jumpStartTime = now;
+                        state = STATE_JUMPING;
+                        lastLandTime = 0;
+                    }
+                } else {
+                    lastLandTime = 0;
                 }
-            }
-        }
+                break;
 
-        // Если мы уже атаковали, но всё ещё в воздухе – ничего не делаем, ждём приземления.
-        // При приземлении сбросится hasJumped.
+            case STATE_JUMPING:
+                if (now - jumpStartTime >= POST_JUMP_DELAY) {
+                    if (!mc.player.isOnGround() && mc.player.getVelocity().y < 0) {
+                        mc.interactionManager.attackEntity(mc.player, target);
+                        mc.player.swingHand(mc.player.getActiveHand());
+                        state = STATE_ATTACKED;
+                    }
+                }
+                break;
+
+            case STATE_ATTACKED:
+                if (mc.player.isOnGround()) {
+                    state = STATE_READY;
+                    lastLandTime = now;
+                }
+                break;
+        }
     }
 
     private static LivingEntity getTarget() {
