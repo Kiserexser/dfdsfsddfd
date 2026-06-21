@@ -3,6 +3,7 @@ package com.example.speed;
 import net.fabricmc.api.ModInitializer;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.entity.LivingEntity;
+import net.minecraft.util.hit.HitResult;
 import net.minecraft.util.math.Box;
 import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.Vec3d;
@@ -18,45 +19,43 @@ public class SpeedMod implements ModInitializer {
     public static final Logger LOGGER = LoggerFactory.getLogger("speedmod");
     private static final MinecraftClient mc = MinecraftClient.getInstance();
 
-    private static boolean enabled = false;
-    private static final Random random = new Random();
-
+    // ==================== Настройки ====================
     private static final double RANGE = 4.5;
+    private static final double MIN_DELAY = 0.690;
+    private static final double MAX_DELAY = 0.750;
     private static final boolean SPRINT_RESET = true;
-    private static final float SMOOTH_SPEED = 0.15f;
-    private static final boolean ONLY_CRITS = true;
+    private static final boolean CHECK_VISIBILITY = true; // проверка на видимость (raycast)
 
+    // Параметры поворота (для обхода Grim)
+    private static final float BASE_SMOOTH_SPEED = 0.12f;      // базовая скорость поворота
+    private static final float SPEED_VARIATION = 0.3f;         // ±30% вариации
+    private static final float MAX_YAW_CHANGE = 15.0f;         // макс. изменение yaw за тик (градусы)
+    private static final float MAX_PITCH_CHANGE = 10.0f;       // макс. изменение pitch за тик
+
+    // Джиттер и смещение (для натуральности)
+    private static final float JITTER_RANGE = 0.35f;
     private static final boolean ENABLE_SHIFT = true;
     private static final float SHIFT_DEGREES = 1.5f;
     private static final long SHIFT_DURATION_MS = 3000;
     private static final long RETURN_DURATION_MS = 2000;
-    private static final float JITTER_RANGE = 0.35f;
 
-    private static float targetYaw = 0;
-    private static float targetPitch = 0;
+    // ==================== Состояния ====================
+    private static boolean enabled = false;
+    private static final Random random = new Random();
+    private static long lastAttackTime = 0;
+
     private static long shiftCycleStart = System.currentTimeMillis();
     private static boolean isShiftPhase = true;
     private static LivingEntity lockedTarget = null;
 
-    // === Состояния автомата ===
-    private static final int STATE_READY = 0;
-    private static final int STATE_JUMPING = 1;
-    private static final int STATE_ATTACKED = 2;
-
-    private static int state = STATE_READY;
-    private static long jumpStartTime = 0;
-    private static long lastLandTime = 0;
-
-    private static final long POST_JUMP_DELAY = 290;   // 290 мс (как ты просил)
-    private static final long POST_LAND_DELAY = 50;    // 50 мс после приземления
-
+    // ==================== Поток и клавиша ====================
     private static boolean wasRPressed = false;
     private static Thread workerThread;
     private static volatile boolean running = true;
 
     @Override
     public void onInitialize() {
-        LOGGER.info("KillAura (auto-jump with 290ms delay, 50ms post-land) loaded. Press R to toggle.");
+        LOGGER.info("KillAura (Grim/Spooky bypass with normalized angles) loaded. Press R to toggle.");
 
         workerThread = new Thread(() -> {
             while (running) {
@@ -67,12 +66,7 @@ public class SpeedMod implements ModInitializer {
 
                         if (rPressed && !wasRPressed) {
                             enabled = !enabled;
-                            if (!enabled) {
-                                lockedTarget = null;
-                                state = STATE_READY;
-                                jumpStartTime = 0;
-                                lastLandTime = 0;
-                            }
+                            if (!enabled) lockedTarget = null;
                             LOGGER.info("KillAura: " + (enabled ? "ON" : "OFF"));
                             wasRPressed = true;
                         } else if (!rPressed) {
@@ -81,7 +75,7 @@ public class SpeedMod implements ModInitializer {
                     }
 
                     if (mc != null && mc.player != null && mc.world != null && enabled) {
-                        mc.execute(SpeedMod::updateKillAura);
+                        mc.execute(SpeedMod::update);
                     }
 
                     Thread.sleep(10);
@@ -96,17 +90,12 @@ public class SpeedMod implements ModInitializer {
         workerThread.start();
     }
 
-    private static void updateKillAura() {
+    private static void update() {
         if (mc.player == null || mc.world == null) return;
-
-        // Отключаем спринт
-        if (ONLY_CRITS && mc.player.isSprinting()) {
-            mc.player.setSprinting(false);
-        }
 
         long now = System.currentTimeMillis();
 
-        // === Смещение ===
+        // === Обновление фазы смещения ===
         long elapsedShift = now - shiftCycleStart;
         if (isShiftPhase && elapsedShift >= SHIFT_DURATION_MS) {
             isShiftPhase = false;
@@ -128,75 +117,125 @@ public class SpeedMod implements ModInitializer {
             target = lockedTarget;
         }
 
-        // === Наведение (всегда) ===
-        if (target != null) {
-            double dist = mc.player.distanceTo(target);
-            if (dist <= RANGE) {
-                Vec3d eyePos = mc.player.getEyePos();
-                Vec3d targetPos = target.getPos().add(0, target.getHeight() * 0.5, 0);
+        if (target == null) return;
 
-                double dx = targetPos.x - eyePos.x;
-                double dy = targetPos.y - eyePos.y;
-                double dz = targetPos.z - eyePos.z;
-                double distance = Math.sqrt(dx * dx + dz * dz);
-                float yaw = (float) MathHelper.atan2(dz, dx) * (180F / (float) Math.PI) - 90F;
-                float pitch = (float) -MathHelper.atan2(dy, distance) * (180F / (float) Math.PI);
-
-                float jitterYaw = (random.nextFloat() - 0.5f) * JITTER_RANGE * 2;
-                float jitterPitch = (random.nextFloat() - 0.5f) * JITTER_RANGE * 2;
-                float shift = 0f;
-                if (ENABLE_SHIFT && isShiftPhase) shift = SHIFT_DEGREES;
-
-                targetYaw = yaw + jitterYaw;
-                targetPitch = pitch + jitterPitch + shift;
-
-                float currentYaw = mc.player.getYaw();
-                float currentPitch = mc.player.getPitch();
-                float newYaw = lerpAngle(currentYaw, targetYaw, SMOOTH_SPEED);
-                float newPitch = lerpAngle(currentPitch, targetPitch, SMOOTH_SPEED);
-                mc.player.setYaw(newYaw);
-                mc.player.setPitch(newPitch);
-            } else {
-                lockedTarget = null;
-            }
+        double dist = mc.player.distanceTo(target);
+        if (dist > RANGE) {
+            lockedTarget = null;
+            return;
         }
 
-        if (target == null || mc.player.distanceTo(target) > RANGE) return;
+        // === Проверка видимости (если включена) ===
+        if (CHECK_VISIBILITY && !mc.player.canSee(target)) {
+            // цель не видна – пропускаем атаку, но наведение продолжаем
+            // (можно также сбросить цель, чтобы не атаковать сквозь стены)
+        }
 
-        // === Автомат состояний ===
-        switch (state) {
-            case STATE_READY:
-                if (mc.player.isOnGround()) {
-                    if (lastLandTime == 0) lastLandTime = now;
-                    if (now - lastLandTime >= POST_LAND_DELAY) {
-                        mc.player.jump();
-                        jumpStartTime = now;
-                        state = STATE_JUMPING;
-                        lastLandTime = 0;
-                    }
-                } else {
-                    lastLandTime = 0;
-                }
-                break;
+        // === Вычисление целевых углов ===
+        Vec3d eyePos = mc.player.getEyePos();
+        Vec3d targetPos = target.getPos().add(0, target.getHeight() * 0.5, 0);
 
-            case STATE_JUMPING:
-                if (now - jumpStartTime >= POST_JUMP_DELAY) {
-                    if (!mc.player.isOnGround() && mc.player.getVelocity().y < 0) {
-                        mc.interactionManager.attackEntity(mc.player, target);
-                        mc.player.swingHand(mc.player.getActiveHand());
-                        state = STATE_ATTACKED;
-                    }
-                }
-                break;
+        double dx = targetPos.x - eyePos.x;
+        double dy = targetPos.y - eyePos.y;
+        double dz = targetPos.z - eyePos.z;
+        double distance = Math.sqrt(dx * dx + dz * dz);
+        float yaw = (float) MathHelper.atan2(dz, dx) * (180F / (float) Math.PI) - 90F;
+        float pitch = (float) -MathHelper.atan2(dy, distance) * (180F / (float) Math.PI);
 
-            case STATE_ATTACKED:
-                if (mc.player.isOnGround()) {
-                    state = STATE_READY;
-                    lastLandTime = now;
-                }
-                break;
+        // === Нормализация ===
+        yaw = normalizeYaw(yaw);
+        pitch = normalizePitch(pitch);
+
+        // === Джиттер и смещение ===
+        float jitterYaw = (random.nextFloat() - 0.5f) * JITTER_RANGE * 2;
+        float jitterPitch = (random.nextFloat() - 0.5f) * JITTER_RANGE * 2;
+        float shift = 0f;
+        if (ENABLE_SHIFT && isShiftPhase) shift = SHIFT_DEGREES;
+
+        float targetYaw = normalizeYaw(yaw + jitterYaw);
+        float targetPitch = normalizePitch(pitch + jitterPitch + shift);
+
+        // === Плавный поворот (с рандомизацией скорости) ===
+        float currentYaw = mc.player.getYaw();
+        float currentPitch = mc.player.getPitch();
+
+        float speedVariation = 1.0f - SPEED_VARIATION + random.nextFloat() * 2 * SPEED_VARIATION;
+        float speed = BASE_SMOOTH_SPEED * speedVariation;
+
+        float newYaw = interpolateYaw(currentYaw, targetYaw, speed);
+        float newPitch = interpolatePitch(currentPitch, targetPitch, speed);
+
+        // === Ограничение изменения за тик ===
+        newYaw = clampYawChange(currentYaw, newYaw, MAX_YAW_CHANGE);
+        newPitch = clampPitchChange(currentPitch, newPitch, MAX_PITCH_CHANGE);
+
+        mc.player.setYaw(newYaw);
+        mc.player.setPitch(newPitch);
+
+        // === Атака ===
+        long now2 = System.currentTimeMillis();
+        double delay = MIN_DELAY + (MAX_DELAY - MIN_DELAY) * random.nextDouble();
+        long delayMs = (long) (delay * 1000);
+
+        if (now2 - lastAttackTime >= delayMs && target.isAlive()) {
+            if (SPRINT_RESET && mc.player.isSprinting()) {
+                mc.player.setSprinting(false);
+            }
+            // Если цель не видна, можно пропустить атаку (но мы уже проверили)
+            mc.interactionManager.attackEntity(mc.player, target);
+            mc.player.swingHand(mc.player.getActiveHand());
+            lastAttackTime = now2;
         }
     }
+
+    // ==================== Методы нормализации и интерполяции ====================
+
+    private static float normalizeYaw(float yaw) {
+        yaw = yaw % 360.0f;
+        if (yaw > 180.0f) yaw -= 360.0f;
+        if (yaw < -180.0f) yaw += 360.0f;
+        return yaw;
+    }
+
+    private static float normalizePitch(float pitch) {
+        return Math.max(-90.0f, Math.min(90.0f, pitch));
+    }
+
+    private static float interpolateYaw(float from, float to, float speed) {
+        float diff = normalizeYaw(to - from);
+        if (Math.abs(diff) <= speed) {
+            return to;
+        }
+        float step = Math.signum(diff) * speed;
+        return normalizeYaw(from + step);
+    }
+
+    private static float interpolatePitch(float from, float to, float speed) {
+        float diff = to - from;
+        if (Math.abs(diff) <= speed) {
+            return to;
+        }
+        float step = Math.signum(diff) * speed;
+        return normalizePitch(from + step);
+    }
+
+    private static float clampYawChange(float from, float to, float maxChange) {
+        float diff = normalizeYaw(to - from);
+        if (Math.abs(diff) > maxChange) {
+            diff = Math.signum(diff) * maxChange;
+        }
+        return normalizeYaw(from + diff);
+    }
+
+    private static float clampPitchChange(float from, float to, float maxChange) {
+        float diff = to - from;
+        if (Math.abs(diff) > maxChange) {
+            diff = Math.signum(diff) * maxChange;
+        }
+        return normalizePitch(from + diff);
+    }
+
+    // ==================== Выбор цели ====================
 
     private static LivingEntity getTarget() {
         try {
@@ -208,13 +247,5 @@ public class SpeedMod implements ModInitializer {
         } catch (Exception e) {
             return null;
         }
-    }
-
-    private static float lerpAngle(float from, float to, float speed) {
-        float diff = to - from;
-        diff = (diff % 360 + 540) % 360 - 180;
-        float step = diff * speed;
-        if (Math.abs(step) > Math.abs(diff)) step = diff;
-        return from + step;
     }
 }
