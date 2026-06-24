@@ -6,6 +6,7 @@ import net.minecraft.client.MinecraftClient;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
+import net.minecraft.registry.tag.BlockTags;
 import net.minecraft.text.Text;
 import net.minecraft.util.Hand;
 import net.minecraft.util.hit.BlockHitResult;
@@ -30,7 +31,7 @@ public class SpeedMod implements ModInitializer {
     private static final int SCAN_RADIUS = 8;
     private static final int SCAN_HEIGHT = 30;
     private static final long ACTION_DELAY = 100;
-    private static final float ROTATION_SPEED = 0.9f; // ← быстрая плавность
+    private static final float ROTATION_SPEED = 0.9f;
 
     // ==================== СОСТОЯНИЕ ====================
     private static boolean enabled = false;
@@ -46,7 +47,7 @@ public class SpeedMod implements ModInitializer {
 
     @Override
     public void onInitialize() {
-        LOGGER.info("AppleFarm (fast smooth rotation) loaded. Press Z to toggle.");
+        LOGGER.info("AppleFarm (smooth rotation) loaded. Press Z to toggle.");
 
         workerThread = new Thread(() -> {
             while (running) {
@@ -133,7 +134,7 @@ public class SpeedMod implements ModInitializer {
 
         if (!isAimedAt(target)) return;
 
-        boolean isLog = mc.world.getBlockState(target).isIn(net.minecraft.block.BlockTags.LOGS);
+        boolean isLog = mc.world.getBlockState(target).isIn(BlockTags.LOGS);
         if (isLog) {
             switchToBestTool(target, true);
         } else {
@@ -145,7 +146,7 @@ public class SpeedMod implements ModInitializer {
         lastActionTime = System.currentTimeMillis();
     }
 
-    // ==================== ПЛАВНАЯ РОТАЦИЯ (speed 0.9) ====================
+    // ==================== ПЛАВНАЯ РОТАЦИЯ ====================
     private static void smoothRotate(BlockPos pos) {
         Vec3d eye = mc.player.getEyePos();
         Vec3d target = pos.toCenterPos();
@@ -229,7 +230,7 @@ public class SpeedMod implements ModInitializer {
         if (slot == -1) return;
 
         BlockPos saplingPos = farmLocation.up();
-        if (!mc.world.getBlockState(saplingPos).isIn(net.minecraft.block.BlockTags.SAPLINGS)) return;
+        if (!mc.world.getBlockState(saplingPos).isIn(BlockTags.SAPLINGS)) return;
 
         int oldSlot = mc.player.getInventory().selectedSlot;
         mc.player.getInventory().selectedSlot = slot;
@@ -261,9 +262,9 @@ public class SpeedMod implements ModInitializer {
                     if (dist > REACH * REACH) continue;
 
                     var state = mc.world.getBlockState(pos);
-                    if (state.isIn(net.minecraft.block.BlockTags.LOGS)) {
+                    if (state.isIn(BlockTags.LOGS)) {
                         logs.add(pos);
-                    } else if (state.isIn(net.minecraft.block.BlockTags.LEAVES)) {
+                    } else if (state.isIn(BlockTags.LEAVES)) {
                         leaves.add(pos);
                     }
                 }
@@ -290,7 +291,7 @@ public class SpeedMod implements ModInitializer {
         for (int x = -r; x <= r; x++) {
             for (int z = -r; z <= r; z++) {
                 for (int y = 0; y <= h; y++) {
-                    if (mc.world.getBlockState(farmLocation.add(x, y, z)).isIn(net.minecraft.block.BlockTags.LOGS)) {
+                    if (mc.world.getBlockState(farmLocation.add(x, y, z)).isIn(BlockTags.LOGS)) {
                         return true;
                     }
                 }
@@ -300,7 +301,7 @@ public class SpeedMod implements ModInitializer {
     }
 
     private static boolean isSaplingPlanted() {
-        return mc.world.getBlockState(farmLocation.up()).isIn(net.minecraft.block.BlockTags.SAPLINGS);
+        return mc.world.getBlockState(farmLocation.up()).isIn(BlockTags.SAPLINGS);
     }
 
     // ==================== ИНВЕНТАРЬ ====================
