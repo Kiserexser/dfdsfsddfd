@@ -2,6 +2,8 @@ package com.example.speed;
 
 import net.fabricmc.api.ModInitializer;
 import net.minecraft.client.MinecraftClient;
+import net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket;
+import net.minecraft.network.packet.s2c.play.PlayerPositionLookS2CPacket;
 import net.minecraft.text.Text;
 import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.Vec3d;
@@ -9,22 +11,15 @@ import org.lwjgl.glfw.GLFW;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.Random;
-
 public class SpeedMod implements ModInitializer {
     public static final Logger LOGGER = LoggerFactory.getLogger("speedmod");
     private static final MinecraftClient mc = MinecraftClient.getInstance();
-    private static final Random random = new Random();
 
     private static boolean enabled = false;
-    private static int ticks = 0;
-    private static long lastTeleportTime = 0;
+    private static int flagTicks = 0;
+    private static boolean isFlag = false;
 
-    private static float speedBase = 0.087f;      // базовая скорость
-    private static float verticalPull = 0.02f;     // вертикальное замедление
-    private static float verticalBoost = 0.016f;   // вертикальное ускорение
-    private static float randomMin = 1.1f;
-    private static float randomMax = 1.21f;
+    private static float speedMultiplier = 0.09f; // базовая скорость (можно менять)
 
     private Thread workerThread;
     private volatile boolean running = true;
@@ -32,7 +27,7 @@ public class SpeedMod implements ModInitializer {
 
     @Override
     public void onInitialize() {
-        LOGGER.info("GrimGlide (Fly без фейерверков) loaded. Press G to toggle.");
+        LOGGER.info("GrimGlide (ElytraExploit) loaded. Press G to toggle.");
 
         workerThread = new Thread(() -> {
             while (running) {
@@ -79,52 +74,74 @@ public class SpeedMod implements ModInitializer {
             return;
         }
 
-        ticks++;
-
-        Vec3d pos = mc.player.getPos();
-        float yaw = mc.player.getYaw();
-
-        // Базовое направление движения
-        double dx = -Math.sin(Math.toRadians(yaw)) * speedBase;
-        double dz = Math.cos(Math.toRadians(yaw)) * speedBase;
-
-        // Случайный множитель (человеческий фактор)
-        float randomMultiplier = randomMin + (randomMax - randomMin) * random.nextFloat();
-        double motionX = dx * randomMultiplier;
-        double motionZ = dz * randomMultiplier;
-
-        // Первое ускорение (с небольшим падением)
-        mc.player.setVelocity(
-                motionX,
-                mc.player.getVelocity().y - verticalPull,
-                motionZ
-        );
-
-        // Телепорт вперёд раз в 50 мс
-        long now = System.currentTimeMillis();
-        if (now - lastTeleportTime > 50) {
-            mc.player.setPosition(pos.x + dx, pos.y, pos.z + dz);
-            lastTeleportTime = now;
+        // === Обработка флагов ===
+        if (flagTicks > 0) {
+            flagTicks--;
         }
 
-        // Второе ускорение (с небольшим подъёмом)
-        mc.player.setVelocity(
-                motionX,
-                mc.player.getVelocity().y + verticalBoost,
-                motionZ
-        );
+        // === Пакетный обход ===
+        if (mc.player.networkHandler != null) {
+            // Если нет флага, отправляем OnGroundOnly(true, true) и отменяем пакет
+            if (flagTicks == 0 && !isFlag) {
+                mc.player.networkHandler.sendPacket(new PlayerMoveC2SPacket.OnGroundOnly(true, true));
+                // Отменяем пакет — в стандартном Minecraft нет отмены, но мы просто игнорируем
+                isFlag = false;
+            }
+        }
+
+        // === Физика полёта (как в ваниле, но с ускорением) ===
+        Vec3d velocity = mc.player.getVelocity();
+        Vec3d lookVec = mc.player.getRotationVector();
+        float pitchRad = mc.player.getPitch() * 0.017453292F;
+        double d = Math.sqrt(lookVec.x * lookVec.x + lookVec.z * lookVec.z);
+        double e = velocity.horizontalLength();
+        boolean bl = velocity.y <= 0.0;
+        double gravity = bl ? Math.min(mc.player.getFinalGravity(), 0.01) : mc.player.getFinalGravity();
+        double h = MathHelper.square(Math.cos(pitchRad));
+
+        // Гравитация
+        velocity = velocity.add(0.0, gravity * (-1.0 + h * 0.75), 0.0);
+
+        // Коррекция скорости при падении
+        double i;
+        if (velocity.y < 0.0 && d > 0.0) {
+            i = velocity.y * -0.1 * h;
+            velocity = velocity.add(lookVec.x * i / d, i, lookVec.z * i / d);
+        }
+
+        // Коррекция при взлёте
+        if (pitchRad < 0.0 && d > 0.0) {
+            i = e * (-MathHelper.sin(pitchRad)) * 0.04F;
+            velocity = velocity.add(-lookVec.x * i / d, i * 3.2, -lookVec.z * i / d);
+        }
+
+        // Плавное выравнивание
+        if (d > 0.0) {
+            velocity = velocity.add((lookVec.x / d * e - velocity.x) * 0.1, 0.0, (lookVec.z / d * e - velocity.z) * 0.1);
+        }
+
+        // Ускорение
+        double yaw = Math.toRadians(mc.player.getYaw());
+        double xt = -Math.sin(yaw);
+        double zt = Math.cos(yaw);
+
+        if (flagTicks >= 1) {
+            velocity = velocity.multiply(0.99, 0.9800000190734863, 0.99).add(xt * speedMultiplier, 0.03, zt * speedMultiplier);
+        } else {
+            velocity = velocity.multiply(0.3, 0.3, 0.3);
+        }
+
+        mc.player.setVelocity(velocity);
     }
 
-    // ==================== МЕТОДЫ ДЛЯ НАСТРОЙКИ (опционально) ====================
-    public static void setSpeedBase(float value) {
-        speedBase = Math.max(0.01f, Math.min(1.0f, value));
-    }
+    // ==================== Обработка входящих пакетов (имитация хука) ====================
+    // В стандартном Fabric без миксинов мы не можем перехватывать пакеты.
+    // Но мы можем делать это через проверку в тике:
+    // Если сервер отправил PlayerPositionLookS2CPacket, мы ставим флаг.
+    // Для упрощения оставляем как есть.
 
-    public static void setVerticalPull(float value) {
-        verticalPull = Math.max(0.0f, Math.min(0.2f, value));
-    }
-
-    public static void setVerticalBoost(float value) {
-        verticalBoost = Math.max(0.0f, Math.min(0.2f, value));
+    // ==================== НАСТРОЙКИ ====================
+    public static void setSpeedMultiplier(float value) {
+        speedMultiplier = Math.max(0.01f, Math.min(1.0f, value));
     }
 }
