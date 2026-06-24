@@ -6,7 +6,6 @@ import net.minecraft.client.MinecraftClient;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
-import net.minecraft.item.ToolItem;
 import net.minecraft.text.Text;
 import net.minecraft.util.Hand;
 import net.minecraft.util.hit.BlockHitResult;
@@ -31,11 +30,15 @@ public class SpeedMod implements ModInitializer {
     private static final int SCAN_RADIUS = 8;
     private static final int SCAN_HEIGHT = 30;
     private static final long ACTION_DELAY = 100;
+    private static final float ROTATION_SPEED = 0.9f; // ← быстрая плавность
 
     // ==================== СОСТОЯНИЕ ====================
     private static boolean enabled = false;
     private static BlockPos farmLocation = null;
     private static long lastActionTime = 0;
+
+    private static float currentYaw = 0;
+    private static float currentPitch = 0;
 
     private static Thread workerThread;
     private volatile boolean running = true;
@@ -43,7 +46,7 @@ public class SpeedMod implements ModInitializer {
 
     @Override
     public void onInitialize() {
-        LOGGER.info("AppleFarm (full tree chop) loaded. Press Z to toggle.");
+        LOGGER.info("AppleFarm (fast smooth rotation) loaded. Press Z to toggle.");
 
         workerThread = new Thread(() -> {
             while (running) {
@@ -64,6 +67,8 @@ public class SpeedMod implements ModInitializer {
                                     });
                                     enabled = false;
                                 } else {
+                                    currentYaw = mc.player.getYaw();
+                                    currentPitch = mc.player.getPitch();
                                     mc.execute(() -> {
                                         if (mc.player != null) {
                                             mc.player.sendMessage(Text.of("§6AppleFarm §7» §aФерма запущена!"), true);
@@ -110,7 +115,6 @@ public class SpeedMod implements ModInitializer {
             return;
         }
 
-        // Если нет дерева — сажаем и удобряем
         if (!isTreeGrown()) {
             if (!isSaplingPlanted()) {
                 tryPlantSapling();
@@ -120,25 +124,71 @@ public class SpeedMod implements ModInitializer {
             return;
         }
 
-        // Дерево есть — рубим всё (брёвна топором, листву мотыгой)
         if (System.currentTimeMillis() - lastActionTime < ACTION_DELAY) return;
 
         BlockPos target = findBestBlock();
         if (target == null) return;
 
-        if (!aimAtBlock(target)) return;
+        smoothRotate(target);
 
-        // Выбираем инструмент
+        if (!isAimedAt(target)) return;
+
         boolean isLog = mc.world.getBlockState(target).isIn(net.minecraft.block.BlockTags.LOGS);
         if (isLog) {
-            switchToBestTool(target, true); // топор
+            switchToBestTool(target, true);
         } else {
-            switchToBestTool(target, false); // мотыга
+            switchToBestTool(target, false);
         }
 
         mc.interactionManager.attackBlock(target, Direction.UP);
         mc.player.swingHand(Hand.MAIN_HAND);
         lastActionTime = System.currentTimeMillis();
+    }
+
+    // ==================== ПЛАВНАЯ РОТАЦИЯ (speed 0.9) ====================
+    private static void smoothRotate(BlockPos pos) {
+        Vec3d eye = mc.player.getEyePos();
+        Vec3d target = pos.toCenterPos();
+
+        double dx = target.x - eye.x;
+        double dy = target.y - eye.y;
+        double dz = target.z - eye.z;
+        double dist = Math.sqrt(dx * dx + dz * dz);
+
+        float targetYaw = (float) (Math.toDegrees(Math.atan2(dz, dx)) - 90.0);
+        float targetPitch = (float) (-Math.toDegrees(Math.atan2(dy, dist)));
+
+        if (currentYaw == 0 && currentPitch == 0) {
+            currentYaw = mc.player.getYaw();
+            currentPitch = mc.player.getPitch();
+        }
+
+        float yawDiff = wrapDegrees(targetYaw - currentYaw);
+        float pitchDiff = targetPitch - currentPitch;
+
+        currentYaw += yawDiff * ROTATION_SPEED;
+        currentPitch += pitchDiff * ROTATION_SPEED;
+        currentPitch = Math.max(-89f, Math.min(89f, currentPitch));
+
+        mc.player.setYaw(currentYaw);
+        mc.player.setPitch(currentPitch);
+        mc.player.headYaw = currentYaw;
+        mc.player.bodyYaw = currentYaw;
+    }
+
+    private static float wrapDegrees(float angle) {
+        angle %= 360.0f;
+        if (angle >= 180.0f) angle -= 360.0f;
+        if (angle < -180.0f) angle += 360.0f;
+        return angle;
+    }
+
+    private static boolean isAimedAt(BlockPos pos) {
+        HitResult hit = mc.player.raycast(REACH, 1.0f, false);
+        if (hit instanceof BlockHitResult bhr) {
+            return bhr.getBlockPos().equals(pos);
+        }
+        return false;
     }
 
     // ==================== ПОСАДКА ====================
@@ -160,7 +210,8 @@ public class SpeedMod implements ModInitializer {
         int oldSlot = mc.player.getInventory().selectedSlot;
         mc.player.getInventory().selectedSlot = slot;
 
-        if (!aimAtBlock(plantPos)) {
+        smoothRotate(plantPos);
+        if (!isAimedAt(plantPos)) {
             mc.player.getInventory().selectedSlot = oldSlot;
             return;
         }
@@ -183,7 +234,8 @@ public class SpeedMod implements ModInitializer {
         int oldSlot = mc.player.getInventory().selectedSlot;
         mc.player.getInventory().selectedSlot = slot;
 
-        if (!aimAtBlock(saplingPos)) {
+        smoothRotate(saplingPos);
+        if (!isAimedAt(saplingPos)) {
             mc.player.getInventory().selectedSlot = oldSlot;
             return;
         }
@@ -218,9 +270,8 @@ public class SpeedMod implements ModInitializer {
             }
         }
 
-        // Сначала рубим брёвна (сверху вниз), потом листву
         if (!logs.isEmpty()) {
-            logs.sort((a, b) -> Integer.compare(b.getY(), a.getY())); // сверху вниз
+            logs.sort((a, b) -> Integer.compare(b.getY(), a.getY()));
             return logs.get(0);
         }
 
@@ -286,10 +337,8 @@ public class SpeedMod implements ModInitializer {
             Item item = stack.getItem();
 
             if (axe) {
-                // Для брёвен — только топоры
                 if (!(item instanceof net.minecraft.item.AxeItem)) continue;
             } else {
-                // Для листвы — только мотыги (или пустая рука, если мотыги нет)
                 if (!(item instanceof net.minecraft.item.HoeItem)) continue;
             }
 
@@ -300,9 +349,7 @@ public class SpeedMod implements ModInitializer {
             }
         }
 
-        // Если нет мотыги — рубим рукой
         if (bestSlot == -1 && !axe) {
-            // ищем пустой слот
             for (int i = 0; i < 9; i++) {
                 if (mc.player.getInventory().getStack(i).isEmpty()) {
                     bestSlot = i;
@@ -315,29 +362,6 @@ public class SpeedMod implements ModInitializer {
         if (bestSlot != -1 && bestSlot != mc.player.getInventory().selectedSlot) {
             mc.player.getInventory().selectedSlot = bestSlot;
         }
-    }
-
-    // ==================== ПРИЦЕЛИВАНИЕ ====================
-    private static boolean aimAtBlock(BlockPos pos) {
-        Vec3d eye = mc.player.getEyePos();
-        Vec3d target = pos.toCenterPos();
-
-        double dx = target.x - eye.x;
-        double dy = target.y - eye.y;
-        double dz = target.z - eye.z;
-        double dist = Math.sqrt(dx * dx + dz * dz);
-
-        float yaw = (float) (Math.toDegrees(Math.atan2(dz, dx)) - 90.0);
-        float pitch = (float) (-Math.toDegrees(Math.atan2(dy, dist)));
-
-        mc.player.setYaw(yaw);
-        mc.player.setPitch(pitch);
-
-        HitResult hit = mc.player.raycast(REACH, 1.0f, false);
-        if (hit instanceof BlockHitResult bhr) {
-            return bhr.getBlockPos().equals(pos);
-        }
-        return false;
     }
 
     // ==================== ВСПОМОГАТЕЛЬНОЕ ====================
