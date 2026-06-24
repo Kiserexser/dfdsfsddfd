@@ -1,64 +1,93 @@
 package com.example.speed;
 
 import net.fabricmc.api.ModInitializer;
+import net.minecraft.block.Blocks;
 import net.minecraft.client.MinecraftClient;
-import net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket;
-import net.minecraft.network.packet.s2c.play.PlayerPositionLookS2CPacket;
+import net.minecraft.item.Items;
 import net.minecraft.text.Text;
-import net.minecraft.util.math.MathHelper;
-import net.minecraft.util.math.Vec3d;
+import net.minecraft.util.hit.BlockHitResult;
+import net.minecraft.util.hit.HitResult;
+import net.minecraft.util.math.BlockPos;
 import org.lwjgl.glfw.GLFW;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import java.util.concurrent.CopyOnWriteArrayList;
 
 public class SpeedMod implements ModInitializer {
     public static final Logger LOGGER = LoggerFactory.getLogger("speedmod");
     private static final MinecraftClient mc = MinecraftClient.getInstance();
 
+    // === НАСТРОЙКИ ===
+    private static int keyBind = GLFW.GLFW_KEY_UNKNOWN; // клавиша (можно менять)
+    private static float range = 5.0f;                 // радиус
+    private static boolean autoWater = true;           // авто-ведро
+
+    // === СОСТОЯНИЕ ===
     private static boolean enabled = false;
-    private static int flagTicks = 0;
-    private static boolean isFlag = false;
+    private static boolean wasPressed = false;
+    private static final CopyOnWriteArrayList<BlockPos> phantomWater = new CopyOnWriteArrayList<>();
 
-    private static float speedMultiplier = 0.09f; // базовая скорость (можно менять)
-
+    // === ПОТОК ===
     private Thread workerThread;
     private volatile boolean running = true;
-    private boolean wasGPressed = false;
 
     @Override
     public void onInitialize() {
-        LOGGER.info("GrimGlide (ElytraExploit) loaded. Press G to toggle.");
+        LOGGER.info("WaterFake loaded. Press R to toggle.");
 
         workerThread = new Thread(() -> {
             while (running) {
                 try {
                     if (mc != null && mc.getWindow() != null) {
                         long window = mc.getWindow().getHandle();
-                        boolean gPressed = GLFW.glfwGetKey(window, GLFW.GLFW_KEY_G) == GLFW.GLFW_PRESS;
+                        boolean rPressed = GLFW.glfwGetKey(window, GLFW.GLFW_KEY_R) == GLFW.GLFW_PRESS;
 
-                        if (gPressed && !wasGPressed) {
+                        if (rPressed && !wasPressed) {
                             enabled = !enabled;
                             mc.execute(() -> {
                                 if (mc.player != null) {
-                                    mc.player.sendMessage(Text.of("§6GrimGlide §7» " + (enabled ? "§aВключён" : "§cВыключен")), true);
+                                    mc.player.sendMessage(Text.of("§6WaterFake §7» " + (enabled ? "§aВключён" : "§cВыключен")), true);
                                 }
                             });
-                            LOGGER.info("GrimGlide: " + (enabled ? "ON" : "OFF"));
-                            wasGPressed = true;
-                        } else if (!gPressed) {
-                            wasGPressed = false;
+                            LOGGER.info("WaterFake: " + (enabled ? "ON" : "OFF"));
+                            if (!enabled) {
+                                // При выключении убираем всю воду
+                                mc.execute(() -> {
+                                    for (BlockPos pos : phantomWater) {
+                                        if (mc.world != null) {
+                                            mc.world.setBlockState(pos, Blocks.AIR.getDefaultState());
+                                        }
+                                    }
+                                    phantomWater.clear();
+                                });
+                            }
+                            wasPressed = true;
+                        } else if (!rPressed) {
+                            wasPressed = false;
+                        }
+
+                        // === Обработка нажатия ===
+                        if (enabled) {
+                            boolean keyPressed = isKeyPressed(keyBind);
+                            if (keyPressed && !wasPressed) {
+                                mc.execute(SpeedMod::tryPlace);
+                                wasPressed = true;
+                            } else if (!keyPressed) {
+                                wasPressed = false;
+                            }
                         }
                     }
 
                     if (mc != null && mc.player != null && mc.world != null && enabled) {
-                        mc.execute(SpeedMod::applyGrimGlide);
+                        mc.execute(SpeedMod::updateWater);
                     }
 
                     Thread.sleep(10);
                 } catch (InterruptedException ignored) {
                     break;
                 } catch (Exception e) {
-                    LOGGER.error("GrimGlide error", e);
+                    LOGGER.error("WaterFake error", e);
                 }
             }
         });
@@ -66,82 +95,64 @@ public class SpeedMod implements ModInitializer {
         workerThread.start();
     }
 
-    private static void applyGrimGlide() {
-        if (mc.player == null) return;
-
-        // Работает только на элитрах
-        if (!mc.player.isGliding()) {
-            return;
+    private static void updateWater() {
+        if (mc.world == null) return;
+        // Поддерживаем воду каждые несколько тиков
+        for (BlockPos pos : phantomWater) {
+            mc.world.setBlockState(pos, Blocks.WATER.getDefaultState(), 3);
         }
+    }
 
-        // === Обработка флагов ===
-        if (flagTicks > 0) {
-            flagTicks--;
-        }
+    private static void tryPlace() {
+        if (mc.player == null || mc.world == null) return;
 
-        // === Пакетный обход ===
-        if (mc.player.networkHandler != null) {
-            // Если нет флага, отправляем OnGroundOnly(true, true) и отменяем пакет
-            if (flagTicks == 0 && !isFlag) {
-                mc.player.networkHandler.sendPacket(new PlayerMoveC2SPacket.OnGroundOnly(true, true));
-                // Отменяем пакет — в стандартном Minecraft нет отмены, но мы просто игнорируем
-                isFlag = false;
+        // Проверка прицела
+        if (!(mc.crosshairTarget instanceof BlockHitResult hit)) return;
+        if (hit.getType() != HitResult.Type.BLOCK) return;
+
+        // Проверка расстояния
+        double distSq = mc.player.squaredDistanceTo(hit.getBlockPos().toCenterPos());
+        if (distSq > range * range) return;
+
+        BlockPos placePos = hit.getBlockPos().offset(hit.getSide());
+        if (!mc.world.getBlockState(placePos).isAir()) return;
+        if (phantomWater.contains(placePos)) return;
+
+        // Проверка ведра в руке
+        if (!mc.player.getMainHandStack().isOf(Items.WATER_BUCKET)) return;
+
+        // Ставим воду
+        mc.world.setBlockState(placePos, Blocks.WATER.getDefaultState(), 3);
+        phantomWater.add(placePos);
+
+        // Авто-ведро (меняем местами основную руку и оффхенд)
+        if (autoWater) {
+            var mainStack = mc.player.getMainHandStack();
+            var offStack = mc.player.getOffHandStack();
+            if (!offStack.isOf(Items.WATER_BUCKET)) {
+                mc.player.getInventory().main.set(mc.player.getInventory().selectedSlot, offStack);
+                mc.player.getInventory().offHand.set(0, mainStack);
             }
         }
 
-        // === Физика полёта (как в ваниле, но с ускорением) ===
-        Vec3d velocity = mc.player.getVelocity();
-        Vec3d lookVec = mc.player.getRotationVector();
-        float pitchRad = mc.player.getPitch() * 0.017453292F;
-        double d = Math.sqrt(lookVec.x * lookVec.x + lookVec.z * lookVec.z);
-        double e = velocity.horizontalLength();
-        boolean bl = velocity.y <= 0.0;
-        double gravity = bl ? Math.min(mc.player.getFinalGravity(), 0.01) : mc.player.getFinalGravity();
-        double h = MathHelper.square(Math.cos(pitchRad));
-
-        // Гравитация
-        velocity = velocity.add(0.0, gravity * (-1.0 + h * 0.75), 0.0);
-
-        // Коррекция скорости при падении
-        double i;
-        if (velocity.y < 0.0 && d > 0.0) {
-            i = velocity.y * -0.1 * h;
-            velocity = velocity.add(lookVec.x * i / d, i, lookVec.z * i / d);
+        // Сообщение
+        if (mc.player != null) {
+            mc.player.sendMessage(Text.of("§6WaterFake §7» §aВода поставлена!"), true);
         }
-
-        // Коррекция при взлёте
-        if (pitchRad < 0.0 && d > 0.0) {
-            i = e * (-MathHelper.sin(pitchRad)) * 0.04F;
-            velocity = velocity.add(-lookVec.x * i / d, i * 3.2, -lookVec.z * i / d);
-        }
-
-        // Плавное выравнивание
-        if (d > 0.0) {
-            velocity = velocity.add((lookVec.x / d * e - velocity.x) * 0.1, 0.0, (lookVec.z / d * e - velocity.z) * 0.1);
-        }
-
-        // Ускорение
-        double yaw = Math.toRadians(mc.player.getYaw());
-        double xt = -Math.sin(yaw);
-        double zt = Math.cos(yaw);
-
-        if (flagTicks >= 1) {
-            velocity = velocity.multiply(0.99, 0.9800000190734863, 0.99).add(xt * speedMultiplier, 0.03, zt * speedMultiplier);
-        } else {
-            velocity = velocity.multiply(0.3, 0.3, 0.3);
-        }
-
-        mc.player.setVelocity(velocity);
     }
 
-    // ==================== Обработка входящих пакетов (имитация хука) ====================
-    // В стандартном Fabric без миксинов мы не можем перехватывать пакеты.
-    // Но мы можем делать это через проверку в тике:
-    // Если сервер отправил PlayerPositionLookS2CPacket, мы ставим флаг.
-    // Для упрощения оставляем как есть.
+    private static boolean isKeyPressed(int keyCode) {
+        if (keyCode == GLFW.GLFW_KEY_UNKNOWN) return false;
+        if (mc.getWindow() == null) return false;
+        return GLFW.glfwGetKey(mc.getWindow().getHandle(), keyCode) == GLFW.GLFW_PRESS;
+    }
 
-    // ==================== НАСТРОЙКИ ====================
-    public static void setSpeedMultiplier(float value) {
-        speedMultiplier = Math.max(0.01f, Math.min(1.0f, value));
+    // ==================== МЕТОДЫ ДЛЯ НАСТРОЙКИ ====================
+    public static void setKeyBind(int key) {
+        keyBind = key;
+    }
+
+    public static void setRange(float value) {
+        range = Math.max(1.0f, Math.min(10.0f, value));
     }
 }
