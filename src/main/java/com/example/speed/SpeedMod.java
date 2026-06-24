@@ -27,10 +27,10 @@ public class SpeedMod implements ModInitializer {
 
         private static final int TOGGLE_KEY = GLFW.GLFW_KEY_R;
 
-        // ========= НАСТРОЙКИ =========
-        private static final double BASE_SPEED = 0.2;   // спринт
-        private static final double MULTIPLIER = 1.6;   // 1.6x
-        private static final double MAX_SPEED = 1.2;    // ограничение
+        // Настройки скорости
+        private static final double BASE_SPEED = 0.2;
+        private static final double MULTIPLIER = 1.6;
+        private static final double MAX_SPEED = 1.2;
 
         @Override
         public void run() {
@@ -85,8 +85,6 @@ public class SpeedMod implements ModInitializer {
                     || block instanceof VineBlock
                     || block instanceof LadderBlock
                     || block instanceof ScaffoldingBlock
-                    || block instanceof CaveVinesBlock
-                    || block instanceof CaveVinesPlantBlock
                     || block instanceof SweetBerryBushBlock;
         }
 
@@ -111,7 +109,7 @@ public class SpeedMod implements ModInitializer {
 
                 Vec3d currentVel = player.getVelocity();
                 double currentSpeed = Math.sqrt(currentVel.x * currentVel.x + currentVel.z * currentVel.z);
-                double targetSpeed = Math.min(MAX_SPEED, BASE_SPEED * MULTIPLIER); // теперь 0.32
+                double targetSpeed = Math.min(MAX_SPEED, BASE_SPEED * MULTIPLIER);
 
                 if (currentSpeed < targetSpeed) {
                     double newSpeed = Math.min(targetSpeed, currentSpeed + 0.02);
