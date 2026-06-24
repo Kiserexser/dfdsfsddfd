@@ -61,23 +61,21 @@ public class SpeedMod implements ModInitializer {
                     BlockState state = mc.world.getBlockState(feetPos);
                     Block block = state.getBlock();
 
-                    if (isSpecialBlock(block, state)) {
+                    if (isSpecialBlock(block)) {
                         applySpeed(player);
                     }
                 });
             }
         }
 
-        private boolean isSpecialBlock(Block block, BlockState state) {
+        private boolean isSpecialBlock(Block block) {
             return block instanceof SnowBlock
-                    || block instanceof SnowyBlock
                     || block instanceof SlabBlock
-                    || block instanceof StairBlock
+                    || block instanceof StairsBlock
                     || block instanceof TrapdoorBlock
                     || block instanceof FenceBlock
                     || block instanceof FenceGateBlock
                     || block instanceof FlowerPotBlock
-                    || block instanceof LightBlock
                     || block instanceof PressurePlateBlock
                     || block instanceof LeverBlock
                     || block instanceof ButtonBlock
