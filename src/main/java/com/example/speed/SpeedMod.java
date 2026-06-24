@@ -75,7 +75,8 @@ public class SpeedMod implements ModInitializer {
 
         boolean forward = mc.options.forwardKey.isPressed();
         boolean hasDepthStrider = false;
-        ItemStack boots = mc.player.getInventory().getArmorStack(EquipmentSlot.FEET);
+        // Исправлено: используем getEntitySlotId()
+        ItemStack boots = mc.player.getInventory().getArmorStack(EquipmentSlot.FEET.getEntitySlotId());
 
         if (!boots.isEmpty()) {
             String bootsString = boots.toString().toLowerCase();
