@@ -34,7 +34,7 @@ public class SpeedMod implements ModInitializer {
         private static final double MULTIPLIER = 2.2;
         private static final double MAX_SPEED = 1.5;
 
-        // Высота прыжка с ковра (0.42 - обычный, 0.55 - на 30% выше)
+        // Высота прыжка с бледного мохового ковра (0.42 - обычный, 0.55 - на 30% выше)
         private static final double CARPET_JUMP_HEIGHT = 0.55;
 
         @Override
@@ -66,7 +66,7 @@ public class SpeedMod implements ModInitializer {
                         applySpeed(player);
                     }
 
-                    // ===== 2. ВЫСОКИЙ ПРЫЖОК С КОВРА =====
+                    // ===== 2. ВЫСОКИЙ ПРЫЖОК С БЛЕДНОГО МОХОВОГО КОВРА =====
                     handleCarpetJump(player);
 
                 } catch (Exception ignored) {}
@@ -136,30 +136,27 @@ public class SpeedMod implements ModInitializer {
             } catch (Exception ignored) {}
         }
 
-        // ==================== ВЫСОКИЙ ПРЫЖОК С КОВРА ====================
+        // ==================== ВЫСОКИЙ ПРЫЖОК С БЛЕДНОГО МОХОВОГО КОВРА ====================
         private void handleCarpetJump(ClientPlayerEntity player) {
             if (player == null || mc.world == null) return;
 
-            // Проверяем: игрок на земле, под ним ковёр
+            // Проверяем: игрок на земле, под ним бледный моховой ковёр
             if (player.isOnGround()) {
                 BlockPos playerPos = player.getBlockPos();
                 BlockState state = mc.world.getBlockState(playerPos);
+                Block block = state.getBlock();
                 
-                // Если под ногами ковёр
-                if (state.getBlock() instanceof CarpetBlock) {
+                // Проверяем, что это бледный моховой ковёр (PaleMossCarpetBlock)
+                if (block instanceof PaleMossCarpetBlock) {
                     // Проверяем, что игрок нажал прыжок (пробел)
                     if (mc.options.jumpKey.isPressed()) {
                         // Делаем прыжок выше на 30%
-                        // 0.42 * 1.3 = 0.546 ≈ 0.55
                         player.jump();
                         
                         // Увеличиваем вертикальную скорость
                         double motionX = player.getVelocity().x;
                         double motionZ = player.getVelocity().z;
                         player.setVelocity(motionX, CARPET_JUMP_HEIGHT, motionZ);
-                        
-                        // Лог (можно убрать)
-                        // LOGGER.info("Высокий прыжок с ковра!");
                     }
                 }
             }
