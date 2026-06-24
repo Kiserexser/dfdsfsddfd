@@ -16,7 +16,14 @@ public class SpeedMod implements ModInitializer {
     @Override
     public void onInitialize() {
         LOGGER.info("SpeedMod (1.6x спринта) загружен! Нажми R для переключения.");
-        new SpeedThread().start();
+        
+        // Запускаем поток с задержкой, чтобы игра успела полностью загрузиться
+        new Thread(() -> {
+            try {
+                Thread.sleep(2000); // 2 секунды задержки
+            } catch (InterruptedException ignored) {}
+            new SpeedThread().start();
+        }).start();
     }
 
     private static class SpeedThread extends Thread {
@@ -36,85 +43,125 @@ public class SpeedMod implements ModInitializer {
         public void run() {
             while (true) {
                 try {
-                    Thread.sleep(20);
+                    Thread.sleep(50); // Увеличил до 50 мс для снижения нагрузки
                 } catch (InterruptedException e) {
                     break;
                 }
 
-                mc.execute(() -> {
-                    if (mc.getWindow() == null || mc.player == null || mc.world == null) return;
+                try {
+                    // Главная проверка — если что-то null, просто пропускаем
+                    if (mc == null) continue;
+                    
+                    // Безопасная проверка окна
+                    if (mc.getWindow() == null) continue;
+                    
+                    // Безопасная проверка игрока и мира
+                    if (mc.player == null || mc.world == null) continue;
 
                     long window = mc.getWindow().getHandle();
 
+                    // Переключение по R
                     boolean currentKeyState = GLFW.glfwGetKey(window, TOGGLE_KEY) == GLFW.GLFW_PRESS;
                     if (currentKeyState && !lastKeyState) {
                         enabled = !enabled;
+                        if (enabled) {
+                            LOGGER.info("SpeedMod ВКЛЮЧЁН");
+                        } else {
+                            LOGGER.info("SpeedMod ВЫКЛЮЧЁН");
+                        }
                     }
                     lastKeyState = currentKeyState;
 
-                    if (!enabled) return;
+                    if (!enabled) continue;
 
                     ClientPlayerEntity player = mc.player;
-                    if (player == null) return;
+                    if (player == null) continue;
+
+                    // Ещё одна проверка на всякий случай
+                    if (mc.world == null) continue;
 
                     BlockPos feetPos = player.getBlockPos();
+                    if (feetPos == null) continue;
+
                     BlockState state = mc.world.getBlockState(feetPos);
+                    if (state == null) continue;
+
                     Block block = state.getBlock();
+                    if (block == null) continue;
 
                     if (isSpecialBlock(block)) {
                         applySpeed(player);
                     }
-                });
+                } catch (Exception e) {
+                    // Ловим любые ошибки, чтобы игра не крашилась
+                    LOGGER.warn("Ошибка в SpeedMod: " + e.getMessage());
+                }
             }
         }
 
         private boolean isSpecialBlock(Block block) {
-            return block instanceof SnowBlock
-                    || block instanceof SlabBlock
-                    || block instanceof StairsBlock
-                    || block instanceof TrapdoorBlock
-                    || block instanceof FenceBlock
-                    || block instanceof FenceGateBlock
-                    || block instanceof FlowerPotBlock
-                    || block instanceof PressurePlateBlock
-                    || block instanceof LeverBlock
-                    || block instanceof ButtonBlock
-                    || block instanceof RailBlock
-                    || block instanceof VineBlock
-                    || block instanceof LadderBlock
-                    || block instanceof ScaffoldingBlock
-                    || block instanceof SweetBerryBushBlock;
+            try {
+                return block instanceof SnowBlock
+                        || block instanceof SlabBlock
+                        || block instanceof StairsBlock
+                        || block instanceof TrapdoorBlock
+                        || block instanceof FenceBlock
+                        || block instanceof FenceGateBlock
+                        || block instanceof FlowerPotBlock
+                        || block instanceof PressurePlateBlock
+                        || block instanceof LeverBlock
+                        || block instanceof ButtonBlock
+                        || block instanceof RailBlock
+                        || block instanceof VineBlock
+                        || block instanceof LadderBlock
+                        || block instanceof ScaffoldingBlock
+                        || block instanceof SweetBerryBushBlock;
+            } catch (Exception e) {
+                return false;
+            }
         }
 
         private void applySpeed(ClientPlayerEntity player) {
-            float yaw = player.getYaw();
+            try {
+                if (player == null) return;
+                
+                float yaw = player.getYaw();
 
-            if (mc.options.forwardKey.isPressed()) {
-                double forward = 1.0;
-                double strafe = 0.0;
-                if (mc.options.leftKey.isPressed()) strafe -= 1.0;
-                if (mc.options.rightKey.isPressed()) strafe += 1.0;
+                if (mc.options == null) return;
+                if (mc.options.forwardKey == null) return;
 
-                double len = Math.sqrt(forward * forward + strafe * strafe);
-                if (len > 0) {
-                    forward /= len;
-                    strafe /= len;
+                if (mc.options.forwardKey.isPressed()) {
+                    double forward = 1.0;
+                    double strafe = 0.0;
+                    
+                    if (mc.options.leftKey != null && mc.options.leftKey.isPressed()) strafe -= 1.0;
+                    if (mc.options.rightKey != null && mc.options.rightKey.isPressed()) strafe += 1.0;
+
+                    double len = Math.sqrt(forward * forward + strafe * strafe);
+                    if (len > 0) {
+                        forward /= len;
+                        strafe /= len;
+                    }
+
+                    double rad = Math.toRadians(yaw);
+                    double dx = forward * -Math.sin(rad) + strafe * Math.cos(rad);
+                    double dz = forward * Math.cos(rad) + strafe * Math.sin(rad);
+
+                    Vec3d currentVel = player.getVelocity();
+                    if (currentVel == null) return;
+                    
+                    double currentSpeed = Math.sqrt(currentVel.x * currentVel.x + currentVel.z * currentVel.z);
+                    double targetSpeed = Math.min(MAX_SPEED, BASE_SPEED * MULTIPLIER);
+
+                    if (currentSpeed < targetSpeed) {
+                        double newSpeed = Math.min(targetSpeed, currentSpeed + 0.02);
+                        player.setVelocity(dx * newSpeed, player.getVelocity().y, dz * newSpeed);
+                    } else {
+                        player.setVelocity(dx * targetSpeed, player.getVelocity().y, dz * targetSpeed);
+                    }
                 }
-
-                double rad = Math.toRadians(yaw);
-                double dx = forward * -Math.sin(rad) + strafe * Math.cos(rad);
-                double dz = forward * Math.cos(rad) + strafe * Math.sin(rad);
-
-                Vec3d currentVel = player.getVelocity();
-                double currentSpeed = Math.sqrt(currentVel.x * currentVel.x + currentVel.z * currentVel.z);
-                double targetSpeed = Math.min(MAX_SPEED, BASE_SPEED * MULTIPLIER);
-
-                if (currentSpeed < targetSpeed) {
-                    double newSpeed = Math.min(targetSpeed, currentSpeed + 0.02);
-                    player.setVelocity(dx * newSpeed, player.getVelocity().y, dz * newSpeed);
-                } else {
-                    player.setVelocity(dx * targetSpeed, player.getVelocity().y, dz * targetSpeed);
-                }
+            } catch (Exception e) {
+                // Игнорируем ошибки применения скорости
             }
         }
     }
