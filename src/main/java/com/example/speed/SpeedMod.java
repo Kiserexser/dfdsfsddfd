@@ -4,12 +4,7 @@ import net.fabricmc.api.ModInitializer;
 import net.minecraft.block.*;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.network.ClientPlayerEntity;
-import net.minecraft.item.BlockItem;
-import net.minecraft.item.ItemStack;
-import net.minecraft.util.Hand;
-import net.minecraft.util.hit.BlockHitResult;
 import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
 import org.lwjgl.glfw.GLFW;
 import org.slf4j.Logger;
@@ -34,9 +29,13 @@ public class SpeedMod implements ModInitializer {
         private boolean lastKeyState = false;
         private static final int TOGGLE_KEY = GLFW.GLFW_KEY_R;
 
+        // ========= НАСТРОЙКИ =========
         private static final double BASE_SPEED = 0.2;
         private static final double MULTIPLIER = 2.2;
         private static final double MAX_SPEED = 1.5;
+
+        // Высота прыжка с ковра (0.42 - обычный, 0.55 - на 30% выше)
+        private static final double CARPET_JUMP_HEIGHT = 0.55;
 
         @Override
         public void run() {
@@ -58,6 +57,7 @@ public class SpeedMod implements ModInitializer {
                     ClientPlayerEntity player = mc.player;
                     if (player == null) continue;
 
+                    // ===== 1. ОБЫЧНЫЙ СПИД =====
                     BlockPos feetPos = player.getBlockPos();
                     BlockState state = mc.world.getBlockState(feetPos);
                     Block block = state.getBlock();
@@ -66,7 +66,8 @@ public class SpeedMod implements ModInitializer {
                         applySpeed(player);
                     }
 
-                    handleGriefCarpet();
+                    // ===== 2. ВЫСОКИЙ ПРЫЖОК С КОВРА =====
+                    handleCarpetJump(player);
 
                 } catch (Exception ignored) {}
             }
@@ -135,62 +136,31 @@ public class SpeedMod implements ModInitializer {
             } catch (Exception ignored) {}
         }
 
-        private void handleGriefCarpet() {
-            if (mc.player == null || mc.world == null) return;
+        // ==================== ВЫСОКИЙ ПРЫЖОК С КОВРА ====================
+        private void handleCarpetJump(ClientPlayerEntity player) {
+            if (player == null || mc.world == null) return;
 
-            // 1. Поиск ковра в хотбаре
-            int carpetSlot = -1;
-            for (int i = 0; i < 9; i++) {
-                ItemStack stack = mc.player.getInventory().getStack(i);
-                if (!stack.isEmpty() && stack.getItem() instanceof BlockItem) {
-                    if (((BlockItem) stack.getItem()).getBlock() instanceof CarpetBlock) {
-                        carpetSlot = i;
-                        break;
-                    }
-                }
-            }
-
-            if (carpetSlot == -1) return;
-
-            BlockPos playerPos = mc.player.getBlockPos();
-            BlockPos blockUnder = playerPos.down();
-
-            // 2. Установка ковра в воздухе
-            if (!mc.player.isOnGround() && mc.world.isAir(playerPos) && !mc.world.isAir(blockUnder)) {
-                int prevSlot = mc.player.getInventory().selectedSlot;
-                mc.player.getInventory().selectedSlot = carpetSlot;
-
-                float prevPitch = mc.player.getPitch();
-                mc.player.setPitch(90f);
-
-                Vec3d hitVec = new Vec3d(
-                    blockUnder.getX() + 0.5,
-                    blockUnder.getY() + 0.5,
-                    blockUnder.getZ() + 0.5
-                );
-                BlockHitResult hitResult = new BlockHitResult(
-                    hitVec,
-                    Direction.UP,
-                    blockUnder,
-                    false
-                );
-
-                mc.interactionManager.interactBlock(mc.player, Hand.MAIN_HAND, hitResult);
-                mc.player.swingHand(Hand.MAIN_HAND);
-
-                mc.player.setPitch(prevPitch);
-                mc.player.getInventory().selectedSlot = prevSlot;
-            }
-
-            // 3. Высокий прыжок с ковра
-            if (mc.player.isOnGround()) {
+            // Проверяем: игрок на земле, под ним ковёр
+            if (player.isOnGround()) {
+                BlockPos playerPos = player.getBlockPos();
                 BlockState state = mc.world.getBlockState(playerPos);
+                
+                // Если под ногами ковёр
                 if (state.getBlock() instanceof CarpetBlock) {
-                    mc.player.jump();
-
-                    double motionX = mc.player.getVelocity().x;
-                    double motionZ = mc.player.getVelocity().z;
-                    mc.player.setVelocity(motionX, 0.55, motionZ);
+                    // Проверяем, что игрок нажал прыжок (пробел)
+                    if (mc.options.jumpKey.isPressed()) {
+                        // Делаем прыжок выше на 30%
+                        // 0.42 * 1.3 = 0.546 ≈ 0.55
+                        player.jump();
+                        
+                        // Увеличиваем вертикальную скорость
+                        double motionX = player.getVelocity().x;
+                        double motionZ = player.getVelocity().z;
+                        player.setVelocity(motionX, CARPET_JUMP_HEIGHT, motionZ);
+                        
+                        // Лог (можно убрать)
+                        // LOGGER.info("Высокий прыжок с ковра!");
+                    }
                 }
             }
         }
