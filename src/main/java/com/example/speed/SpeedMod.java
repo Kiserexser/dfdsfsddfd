@@ -6,11 +6,8 @@ import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.gui.widget.ButtonWidget;
 import net.minecraft.entity.LivingEntity;
-import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.text.Text;
 import net.minecraft.util.Hand;
-import net.minecraft.util.hit.BlockHitResult;
-import net.minecraft.util.hit.HitResult;
 import net.minecraft.util.math.Box;
 import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.Vec3d;
@@ -21,7 +18,6 @@ import org.slf4j.LoggerFactory;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Random;
-import java.util.concurrent.ThreadLocalRandom;
 
 public class SpeedMod implements ModInitializer {
     public static final Logger LOGGER = LoggerFactory.getLogger("speedmod");
@@ -34,7 +30,6 @@ public class SpeedMod implements ModInitializer {
     private static long lastAttackTime = 0;
     private static float lastYaw = 0;
     private static float lastPitch = 0;
-    private static int hitCounter = 0;
     private static final Random random = new Random();
     private static final double RANGE = 4.5;
 
@@ -47,7 +42,7 @@ public class SpeedMod implements ModInitializer {
 
     @Override
     public void onInitialize() {
-        LOGGER.info("KillAura (5 modes) loaded. RightShift = GUI, R = toggle.");
+        LOGGER.info("KillAura (5 modes) loaded. Z = toggle, RightShift = GUI.");
 
         workerThread = new Thread(() -> {
             while (running) {
@@ -55,9 +50,9 @@ public class SpeedMod implements ModInitializer {
                     if (mc != null && mc.getWindow() != null) {
                         long window = mc.getWindow().getHandle();
 
-                        // === R — включить/выключить ===
-                        boolean rPressed = GLFW.glfwGetKey(window, GLFW.GLFW_KEY_R) == GLFW.GLFW_PRESS;
-                        if (rPressed) {
+                        // === Z — включить/выключить ===
+                        boolean zPressed = GLFW.glfwGetKey(window, GLFW.GLFW_KEY_Z) == GLFW.GLFW_PRESS;
+                        if (zPressed && !enabled) {
                             enabled = !enabled;
                             if (!enabled) target = null;
                             mc.execute(() -> {
@@ -67,6 +62,8 @@ public class SpeedMod implements ModInitializer {
                             });
                             LOGGER.info("KillAura: " + (enabled ? "ON" : "OFF"));
                             Thread.sleep(300);
+                        } else {
+                            // Если Z зажат, но мод уже включён, ничего не делаем
                         }
 
                         // === RightShift — GUI ===
@@ -190,7 +187,6 @@ public class SpeedMod implements ModInitializer {
             mc.interactionManager.attackEntity(mc.player, target);
             mc.player.swingHand(Hand.MAIN_HAND);
             lastAttackTime = now;
-            hitCounter++;
         }
     }
 
