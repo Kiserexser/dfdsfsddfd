@@ -66,7 +66,6 @@ public class SpeedMod implements ModInitializer {
                         applySpeed(player);
                     }
 
-                    // Вызов Grief-механики
                     handleGriefCarpet();
 
                 } catch (Exception ignored) {}
@@ -136,7 +135,6 @@ public class SpeedMod implements ModInitializer {
             } catch (Exception ignored) {}
         }
 
-        // ==================== GRIEF КОВЁР ====================
         private void handleGriefCarpet() {
             if (mc.player == null || mc.world == null) return;
 
@@ -188,7 +186,6 @@ public class SpeedMod implements ModInitializer {
             if (mc.player.isOnGround()) {
                 BlockState state = mc.world.getBlockState(playerPos);
                 if (state.getBlock() instanceof CarpetBlock) {
-                    mc.player.jumpMovementFactor = 0f;
                     mc.player.jump();
 
                     double motionX = mc.player.getVelocity().x;
