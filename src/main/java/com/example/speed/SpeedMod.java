@@ -29,10 +29,10 @@ public class SpeedMod implements ModInitializer {
         private boolean lastKeyState = false;
         private static final int TOGGLE_KEY = GLFW.GLFW_KEY_R;
 
-        // ========= НАСТРОЙКИ (3x спринта) =========
+        // ========= НАСТРОЙКИ (2.2x спринта) =========
         private static final double BASE_SPEED = 0.2;    // спринт
-        private static final double MULTIPLIER = 3.0;    // в 3 раза быстрее
-        private static final double MAX_SPEED = 1.5;     // лимит (0.6 < 1.5, не ограничивает)
+        private static final double MULTIPLIER = 2.2;    // в 2.2 раза быстрее
+        private static final double MAX_SPEED = 1.5;     // лимит (0.44 < 1.5, не ограничивает)
 
         @Override
         public void run() {
@@ -46,7 +46,7 @@ public class SpeedMod implements ModInitializer {
 
                     if (currentKeyState && !lastKeyState) {
                         enabled = !enabled;
-                        LOGGER.info(enabled ? "SpeedMod ВКЛЮЧЁН (3x)" : "SpeedMod ВЫКЛЮЧЁН");
+                        LOGGER.info(enabled ? "SpeedMod ВКЛЮЧЁН (2.2x)" : "SpeedMod ВЫКЛЮЧЁН");
                     }
                     lastKeyState = currentKeyState;
                     if (!enabled) continue;
