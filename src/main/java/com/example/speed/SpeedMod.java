@@ -82,9 +82,7 @@ public class SpeedMod implements ModInitializer {
                         || block instanceof VineBlock
                         || block instanceof LadderBlock
                         || block instanceof ScaffoldingBlock
-                        || block instanceof SweetBerryBushBlock
-                        || block instanceof CaveVinesBlock
-                        || block instanceof CaveVinesPlantBlock;
+                        || block instanceof SweetBerryBushBlock;
             } catch (Exception e) {
                 return false;
             }
