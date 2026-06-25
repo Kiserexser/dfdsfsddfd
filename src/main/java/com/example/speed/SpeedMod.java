@@ -23,7 +23,7 @@ public class SpeedMod implements ModInitializer {
 
     private static final double SEARCH_RANGE = 5.0;
     private static final double ATTACK_RANGE = 3.0;
-    private static final int MIN_SAMPLES = 50; // минимальное количество сэмплов для обучения
+    private static final int MIN_SAMPLES = 50;
 
     private static enum Mode { OFF, LEARN, PLAY }
     private static Mode mode = Mode.OFF;
@@ -73,7 +73,6 @@ public class SpeedMod implements ModInitializer {
                         boolean xPressed = GLFW.glfwGetKey(window, LEARN_KEY) == GLFW.GLFW_PRESS;
                         boolean cPressed = GLFW.glfwGetKey(window, STOP_LEARN_KEY) == GLFW.GLFW_PRESS;
 
-                        // Z – сброс
                         if (zPressed && !lastZ) {
                             resetLearning();
                             if (mc.player != null)
@@ -81,7 +80,6 @@ public class SpeedMod implements ModInitializer {
                         }
                         lastZ = zPressed;
 
-                        // R – боевой режим
                         if (rPressed && !lastR) {
                             if (isLearned) {
                                 if (mode == Mode.PLAY) {
@@ -109,7 +107,6 @@ public class SpeedMod implements ModInitializer {
                         }
                         lastR = rPressed;
 
-                        // X – начать обучение
                         if (xPressed && !lastX) {
                             recordedData.clear();
                             sampleCount = 0;
@@ -121,7 +118,6 @@ public class SpeedMod implements ModInitializer {
                         }
                         lastX = xPressed;
 
-                        // C – сохранить обучение
                         if (cPressed && !lastC) {
                             if (mode == Mode.LEARN) {
                                 if (sampleCount < MIN_SAMPLES) {
@@ -145,9 +141,15 @@ public class SpeedMod implements ModInitializer {
                         // === ЛОГИКА РЕЖИМОВ ===
                         if (mode == Mode.PLAY && isLearned && !neuralData.isEmpty()) {
                             PlayerEntity target = getTargetPlayer();
-                            if (target == null) { lockedTarget = null; return; }
+                            if (target == null) {
+                                lockedTarget = null;
+                                return;
+                            }
                             double dist = mc.player.distanceTo(target);
-                            if (dist > SEARCH_RANGE) { lockedTarget = null; return; }
+                            if (dist > SEARCH_RANGE) {
+                                lockedTarget = null;
+                                return;
+                            }
                             lockedTarget = target;
 
                             float[] neuron = getInterpolatedSample();
@@ -196,6 +198,7 @@ public class SpeedMod implements ModInitializer {
         LOGGER.info("Обучение сброшено");
     }
 
+    // === ПОИСК ТОЛЬКО ИГРОКОВ ===
     private static PlayerEntity getTargetPlayer() {
         if (mc.player == null || mc.world == null) return null;
         Box box = mc.player.getBoundingBox().expand(SEARCH_RANGE);
@@ -249,8 +252,12 @@ public class SpeedMod implements ModInitializer {
         return result;
     }
 
+    // === АТАКА ТОЛЬКО ПО ЖИВОМУ ИГРОКУ В РАДИУСЕ ===
     private static void applyStyledNeuron(float[] neuron, LivingEntity target) {
-        if (neuron == null) return;
+        if (neuron == null || target == null) return;
+        // Дополнительная проверка, что цель – именно игрок
+        if (!(target instanceof PlayerEntity)) return;
+
         float targetYaw = neuron[0];
         float targetPitch = neuron[1];
         float time = neuron[3];
@@ -276,15 +283,16 @@ public class SpeedMod implements ModInitializer {
         float randomShift = (random.nextFloat() - 0.5f) * 0.150f;
         long delayMs = (long) ((baseDelay + randomShift + extra * 0.2f) * 1000);
 
-        if (now - lastAttackTime >= delayMs && target.isAlive()) {
+        // === ТРОЙНАЯ ПРОВЕРКА ПЕРЕД УДАРОМ ===
+        if (now - lastAttackTime >= delayMs && target.isAlive() && !target.isDead()) {
             double realDist = mc.player.distanceTo(target);
-            if (realDist <= ATTACK_RANGE) {
+            if (realDist <= ATTACK_RANGE && realDist > 0.1) { // >0.1 чтобы не бить, если цель внутри игрока
                 if (mc.player.isSprinting()) mc.player.setSprinting(false);
                 mc.interactionManager.attackEntity(mc.player, target);
                 mc.player.swingHand(mc.player.getActiveHand());
                 lastAttackTime = now;
                 if (random.nextFloat() < 0.04f + extra * 0.1f) {
-                    lastAttackTime = now + 150;
+                    lastAttackTime = now + 150; // пропуск удара
                 }
             }
         }
