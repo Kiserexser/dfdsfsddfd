@@ -1,9 +1,8 @@
 package com.example.speed;
 
 import net.fabricmc.api.ModInitializer;
-import net.fabricmc.fabric.api.client.command.v2.ClientCommandManager;
-import net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource;
 import net.minecraft.client.MinecraftClient;
+import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.text.Text;
 import net.minecraft.util.math.Box;
@@ -29,7 +28,7 @@ public class SpeedMod implements ModInitializer {
     // === РЕЖИМЫ ===
     private static enum Mode { OFF, LEARN, PLAY }
     private static Mode mode = Mode.OFF;
-    private static boolean isLearned = false; // обучен ли мод
+    private static boolean isLearned = false; // обучен ли мод (есть ли стиль)
 
     // === ЗАПИСЬ ===
     private static final Queue<float[]> recordedData = new ConcurrentLinkedQueue<>();
@@ -42,11 +41,9 @@ public class SpeedMod implements ModInitializer {
     // === ВОСПРОИЗВЕДЕНИЕ ===
     private static List<float[]> neuralData = new ArrayList<>();
     private static int playIndex = 0;
-    private static long lastPlayTime = 0;
     private static float lastYaw = 0, lastPitch = 0;
 
     // === СОСТОЯНИЕ ===
-    private static boolean isEnabled = false; // общий включатель (для активации всех режимов)
     private static PlayerEntity lockedTarget = null;
     private static long lastAttackTime = 0;
     private static final Random random = new Random();
@@ -55,23 +52,12 @@ public class SpeedMod implements ModInitializer {
     private static final int TOGGLE_KEY = GLFW.GLFW_KEY_Z;      // Z – боевой режим
     private static final int LEARN_KEY = GLFW.GLFW_KEY_X;      // X – начать обучение
     private static final int STOP_LEARN_KEY = GLFW.GLFW_KEY_C; // C – остановить обучение
-    private static boolean lastZ = false, lastX = false, lastC = false;
+    private static final int RESET_KEY = GLFW.GLFW_KEY_R;      // R – сброс обучения
+    private static boolean lastZ = false, lastX = false, lastC = false, lastR = false;
 
     @Override
     public void onInitialize() {
-        LOGGER.info("StyleCopy KillAura с командами. Z - бой, X - учить, C - запомнить, .cfg restart - сброс");
-
-        // === РЕГИСТРАЦИЯ КОМАНДЫ .cfg restart ===
-        ClientCommandManager.getDispatcher().register(
-            ClientCommandManager.literal("cfg")
-                .then(ClientCommandManager.literal("restart")
-                    .executes(context -> {
-                        resetLearning();
-                        context.getSource().sendFeedback(Text.literal("§cОбучение сброшено! Мод забыл стиль."));
-                        return 1;
-                    })
-                )
-        );
+        LOGGER.info("StyleCopy KillAura. Z - бой (после обучения), X - учить, C - запомнить, R - забыть");
 
         // Загружаем данные при старте
         loadNeuralData();
@@ -80,7 +66,6 @@ public class SpeedMod implements ModInitializer {
             LOGGER.info("Загружено обучение из файла");
         }
 
-        // Поток для клавиш и логики
         new Thread(() -> {
             while (true) {
                 try {
@@ -93,72 +78,74 @@ public class SpeedMod implements ModInitializer {
 
                         long window = mc.getWindow().getHandle();
 
-                        // === ОБРАБОТКА КЛАВИШ ===
+                        // === ЧТЕНИЕ КЛАВИШ ===
                         boolean zPressed = GLFW.glfwGetKey(window, TOGGLE_KEY) == GLFW.GLFW_PRESS;
                         boolean xPressed = GLFW.glfwGetKey(window, LEARN_KEY) == GLFW.GLFW_PRESS;
                         boolean cPressed = GLFW.glfwGetKey(window, STOP_LEARN_KEY) == GLFW.GLFW_PRESS;
+                        boolean rPressed = GLFW.glfwGetKey(window, RESET_KEY) == GLFW.GLFW_PRESS;
 
-                        // Z – включает/выключает боевой режим (только если обучен)
+                        // R – сброс обучения (забывание)
+                        if (rPressed && !lastR) {
+                            resetLearning();
+                            if (mc.player != null)
+                                mc.player.sendMessage(Text.literal("§cОбучение сброшено! Стиль забыт. Можешь переобучить (X → играть → C)."), true);
+                        }
+                        lastR = rPressed;
+
+                        // Z – боевой режим (только если обучен)
                         if (zPressed && !lastZ) {
                             if (isLearned) {
                                 if (mode == Mode.PLAY) {
                                     mode = Mode.OFF;
-                                    mc.player.sendMessage(Text.literal("§cБоевой режим выключен"), true);
+                                    if (mc.player != null)
+                                        mc.player.sendMessage(Text.literal("§cБоевой режим выключен"), true);
                                 } else {
                                     mode = Mode.PLAY;
                                     playIndex = 0;
                                     lastYaw = mc.player.getYaw();
                                     lastPitch = mc.player.getPitch();
-                                    mc.player.sendMessage(Text.literal("§aБоевой режим включён (стиль загружен)"), true);
+                                    if (mc.player != null)
+                                        mc.player.sendMessage(Text.literal("§aБоевой режим включён (твой стиль загружен)"), true);
                                 }
                             } else {
-                                mc.player.sendMessage(Text.literal("§cСначала обучи меня: нажми X, играй, затем C"), true);
+                                if (mc.player != null)
+                                    mc.player.sendMessage(Text.literal("§cСначала обучи меня: нажми X, играй, затем C"), true);
                             }
                         }
                         lastZ = zPressed;
 
-                        // X – начать обучение (запись)
+                        // X – начать обучение (очищаем старые данные, чтобы не смешивались)
                         if (xPressed && !lastX) {
-                            if (isEnabled) {
-                                if (mode == Mode.LEARN) {
-                                    mode = Mode.OFF;
-                                    mc.player.sendMessage(Text.literal("§cОбучение остановлено (без сохранения)"), true);
-                                } else {
-                                    // Начинаем запись
-                                    recordedData.clear();
-                                    sampleCount = 0;
-                                    recordStartTime = System.currentTimeMillis();
-                                    currentSessionId = String.valueOf(System.currentTimeMillis());
-                                    mode = Mode.LEARN;
-                                    mc.player.sendMessage(Text.literal("§aЗапись стиля начата! Играй как обычно."), true);
-                                }
-                            } else {
-                                mc.player.sendMessage(Text.literal("§cСначала включи мод (Z не подходит, используй / или другой способ?)"), true);
-                                // На самом деле, мод включается автоматически при старте? Мы сделаем, что isEnabled всегда true, но можно отдельно.
-                                // Сделаем, что isEnabled = true всегда, а режимы включаются клавишами.
-                            }
+                            recordedData.clear();
+                            sampleCount = 0;
+                            recordStartTime = System.currentTimeMillis();
+                            currentSessionId = String.valueOf(System.currentTimeMillis());
+                            mode = Mode.LEARN;
+                            if (mc.player != null)
+                                mc.player.sendMessage(Text.literal("§aЗапись стиля начата! Играй как обычно."), true);
                         }
                         lastX = xPressed;
 
                         // C – остановить обучение и сохранить
                         if (cPressed && !lastC) {
                             if (mode == Mode.LEARN) {
-                                // Останавливаем запись, сохраняем
                                 saveNeuralData();
                                 mode = Mode.OFF;
                                 isLearned = true;
-                                mc.player.sendMessage(Text.literal("§aОбучение завершено! Стиль запомнен. Теперь жми Z для боя."), true);
+                                if (mc.player != null)
+                                    mc.player.sendMessage(Text.literal("§aОбучение завершено! Стиль запомнен. Теперь жми Z для боя."), true);
                             } else {
-                                mc.player.sendMessage(Text.literal("§cСейчас не идёт обучение. Нажми X для начала."), true);
+                                if (mc.player != null)
+                                    mc.player.sendMessage(Text.literal("§cСейчас не идёт обучение. Нажми X для начала."), true);
                             }
                         }
                         lastC = cPressed;
 
                         // ====================================================
-                        // ОСНОВНАЯ ЛОГИКА (если режим PLAY или LEARN)
+                        // ЛОГИКА РЕЖИМОВ
                         // ====================================================
 
-                        // Если режим PLAY – атакуем по обученному стилю
+                        // PLAY – атака по обученному стилю
                         if (mode == Mode.PLAY && isLearned) {
                             PlayerEntity target = getTargetPlayer();
                             if (target == null) {
@@ -172,7 +159,6 @@ public class SpeedMod implements ModInitializer {
                             }
                             lockedTarget = target;
 
-                            // Воспроизводим стиль
                             if (!neuralData.isEmpty()) {
                                 float[] neuron = getInterpolatedSample();
                                 if (neuron != null) {
@@ -183,13 +169,10 @@ public class SpeedMod implements ModInitializer {
                             return;
                         }
 
-                        // Если режим LEARN – записываем стиль
+                        // LEARN – запись стиля
                         if (mode == Mode.LEARN) {
                             PlayerEntity target = getTargetPlayer();
-                            if (target == null) {
-                                // Можно записывать и без цели? Но лучше с целью.
-                                return;
-                            }
+                            if (target == null) return;
                             double dist = mc.player.distanceTo(target);
                             if (dist > SEARCH_RANGE) return;
 
@@ -197,11 +180,12 @@ public class SpeedMod implements ModInitializer {
                                 float[] sample = captureFullSample(target);
                                 recordedData.offer(sample);
                                 sampleCount++;
-                                if (sampleCount % 200 == 0) {
+                                if (sampleCount % 200 == 0 && mc.player != null) {
                                     mc.player.sendMessage(Text.literal("§7Записано " + sampleCount + " сэмплов"), true);
                                 }
                             } else {
-                                mc.player.sendMessage(Text.literal("§cДостигнут лимит сэмплов, остановите обучение (C)"), true);
+                                if (mc.player != null)
+                                    mc.player.sendMessage(Text.literal("§cДостигнут лимит сэмплов, остановите обучение (C)"), true);
                                 mode = Mode.OFF;
                             }
                             return;
@@ -215,19 +199,18 @@ public class SpeedMod implements ModInitializer {
         }).start();
     }
 
-    // === СБРОС ОБУЧЕНИЯ ===
+    // === СБРОС ОБУЧЕНИЯ (ЗАБЫВАНИЕ) ===
     private static void resetLearning() {
         recordedData.clear();
         neuralData.clear();
         sampleCount = 0;
         isLearned = false;
         mode = Mode.OFF;
-        // Удаляем файл
         try {
             File file = new File(DATA_FILE);
             if (file.exists()) file.delete();
         } catch (Exception ignored) {}
-        LOGGER.info("Обучение сброшено");
+        LOGGER.info("Обучение сброшено (файл удалён)");
     }
 
     // === ПОИСК ТОЛЬКО ИГРОКОВ ===
@@ -329,8 +312,7 @@ public class SpeedMod implements ModInitializer {
                 mc.player.swingHand(mc.player.getActiveHand());
                 lastAttackTime = now;
                 if (random.nextFloat() < 0.04f + extra * 0.1f) {
-                    // пропускаем удар
-                    lastAttackTime = now + 150;
+                    lastAttackTime = now + 150; // пропуск удара
                 }
             }
         }
@@ -377,7 +359,9 @@ public class SpeedMod implements ModInitializer {
             }
             LOGGER.info("Загружено " + neuralData.size() + " сэмплов");
             if (!neuralData.isEmpty()) isLearned = true;
-        } catch (IOException ignored) {}
+        } catch (IOException ignored) {
+            // файл может отсутствовать — это нормально
+        }
     }
 
     // === ВСПОМОГАТЕЛЬНОЕ ===
