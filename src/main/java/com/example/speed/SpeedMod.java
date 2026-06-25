@@ -126,12 +126,9 @@ public class SpeedMod implements ModInitializer {
         }
     }
 
-    // === ОСТАЛЬНЫЕ МЕТОДЫ ===
-
     @Override
     public void onInitialize() {
-        LOGGER.info("KillAura: R - вкл (после обучения), X - учить, C - запомнить, Z - забыть (файлы не удаляются)");
-        // При старте загружаем самый свежий файл, если есть
+        LOGGER.info("KillAura (смещения) R - вкл, X - учить, C - запомнить, Z - забыть");
         Path latestFile = getLatestSessionFile();
         if (latestFile != null) {
             loadNeuralDataFromFile(latestFile);
@@ -154,7 +151,6 @@ public class SpeedMod implements ModInitializer {
                         boolean xPressed = GLFW.glfwGetKey(window, LEARN_KEY) == GLFW.GLFW_PRESS;
                         boolean cPressed = GLFW.glfwGetKey(window, STOP_LEARN_KEY) == GLFW.GLFW_PRESS;
 
-                        // Z – сброс (забываем текущий стиль, но файлы не удаляем)
                         if (zPressed && !lastZ) {
                             resetLearning();
                             if (mc.player != null)
@@ -162,7 +158,6 @@ public class SpeedMod implements ModInitializer {
                         }
                         lastZ = zPressed;
 
-                        // R – боевой режим
                         if (rPressed && !lastR) {
                             if (isLearned) {
                                 if (mode == Mode.PLAY) {
@@ -170,7 +165,6 @@ public class SpeedMod implements ModInitializer {
                                     if (mc.player != null)
                                         mc.player.sendMessage(Text.literal("§cKillAura выключена"), true);
                                 } else {
-                                    // Если стиль есть, но neuralData пуста (был сброс), пытаемся загрузить последний файл
                                     if (neuralData.isEmpty()) {
                                         Path latestFile2 = getLatestSessionFile();
                                         if (latestFile2 != null) {
@@ -196,7 +190,6 @@ public class SpeedMod implements ModInitializer {
                                     }
                                 }
                             } else {
-                                // Если не обучен, пытаемся загрузить последний файл
                                 Path latestFile3 = getLatestSessionFile();
                                 if (latestFile3 != null) {
                                     loadNeuralDataFromFile(latestFile3);
@@ -204,7 +197,6 @@ public class SpeedMod implements ModInitializer {
                                         isLearned = true;
                                         if (mc.player != null)
                                             mc.player.sendMessage(Text.literal("§aЗагружен последний сохранённый стиль: " + latestFile3.getFileName()), true);
-                                        // Теперь включаем режим PLAY
                                         mode = Mode.PLAY;
                                         playIndex = 0;
                                         lastYaw = mc.player.getYaw();
@@ -223,7 +215,6 @@ public class SpeedMod implements ModInitializer {
                         }
                         lastR = rPressed;
 
-                        // X – начать обучение (очищаем текущую запись, но старые файлы не трогаем)
                         if (xPressed && !lastX) {
                             recordedData.clear();
                             sampleCount = 0;
@@ -235,7 +226,6 @@ public class SpeedMod implements ModInitializer {
                         }
                         lastX = xPressed;
 
-                        // C – сохранить обучение в НОВЫЙ файл
                         if (cPressed && !lastC) {
                             if (mode == Mode.LEARN) {
                                 if (sampleCount < MIN_SAMPLES) {
@@ -246,7 +236,6 @@ public class SpeedMod implements ModInitializer {
                                     saveNeuralDataToNewFile();
                                     mode = Mode.OFF;
                                     isLearned = true;
-                                    // Загружаем только что созданный файл (он будет самым новым)
                                     Path latestFile4 = getLatestSessionFile();
                                     if (latestFile4 != null) {
                                         loadNeuralDataFromFile(latestFile4);
@@ -314,7 +303,6 @@ public class SpeedMod implements ModInitializer {
         LOGGER.info("Обучение забыто (файлы сохранены)");
     }
 
-    // === ПОИСК ИГРОКОВ ===
     private static PlayerEntity getTargetPlayer() {
         if (mc.player == null || mc.world == null) return null;
         Box box = mc.player.getBoundingBox().expand(SEARCH_RANGE);
@@ -325,6 +313,7 @@ public class SpeedMod implements ModInitializer {
         return players.isEmpty() ? null : players.get(0);
     }
 
+    // === ЗАПИСЬ СМЕЩЕНИЙ ===
     private static float[] captureFullSample(LivingEntity target) {
         Vec3d eyePos = mc.player.getEyePos();
         Vec3d targetPos = target.getPos().add(0, target.getHeight() * 0.5, 0);
@@ -333,11 +322,19 @@ public class SpeedMod implements ModInitializer {
         double dz = targetPos.z - eyePos.z;
         double dist = Math.sqrt(dx * dx + dz * dz);
 
-        float yaw = (float) MathHelper.atan2(dz, dx) * (180F / (float) Math.PI) - 90F;
-        float pitch = (float) -MathHelper.atan2(dy, dist) * (180F / (float) Math.PI);
+        // Идеальный угол на центр цели
+        float idealYaw = (float) MathHelper.atan2(dz, dx) * (180F / (float) Math.PI) - 90F;
+        float idealPitch = (float) -MathHelper.atan2(dy, dist) * (180F / (float) Math.PI);
 
+        // Текущий реальный угол игрока (куда он смотрит)
         float curYaw = mc.player.getYaw();
         float curPitch = mc.player.getPitch();
+
+        // Смещение = реальный угол - идеальный угол
+        float offsetYaw = curYaw - idealYaw;
+        float offsetPitch = curPitch - idealPitch;
+
+        // Скорость изменения углов (для плавности)
         float yawVel = curYaw - lastYaw;
         float pitchVel = curPitch - lastPitch;
         lastYaw = curYaw;
@@ -346,8 +343,9 @@ public class SpeedMod implements ModInitializer {
         float time = (float) (System.currentTimeMillis() - recordStartTime) / 1000f;
         float noise = (float) Math.sin(time * 2.5f) * 0.05f + (random.nextFloat() - 0.5f) * 0.03f;
 
+        // Сохраняем: offsetYaw, offsetPitch, dist, time, yawVel, pitchVel, noise, extra
         return new float[]{
-            yaw, pitch, (float) dist, time, curYaw, curPitch,
+            offsetYaw, offsetPitch, (float) dist, time,
             yawVel, pitchVel, noise, (float) (Math.random() * 0.1f)
         };
     }
@@ -359,21 +357,31 @@ public class SpeedMod implements ModInitializer {
         float[] curr = neuralData.get(idx);
         float[] next = neuralData.get(nextIdx);
         float t = 0.5f + 0.4f * (float) Math.sin(playIndex * 0.07f);
-        float[] result = new float[10];
-        for (int i = 0; i < 10; i++) {
+        float[] result = new float[8];
+        for (int i = 0; i < 8; i++) {
             result[i] = curr[i] + (next[i] - curr[i]) * t * 0.5f;
         }
+        // Добавляем небольшие колебания для естественности
         result[0] += (float) Math.sin(playIndex * 0.13f) * 0.02f;
         result[1] += (float) Math.cos(playIndex * 0.17f) * 0.02f;
         return result;
     }
 
-    // === ИСПРАВЛЕННЫЙ applyStyledNeuron (НАВОДИТСЯ НА ЦЕЛЬ) ===
+    // === ВОСПРОИЗВЕДЕНИЕ СМЕЩЕНИЙ ===
     private static void applyStyledNeuron(float[] neuron, LivingEntity target) {
         if (neuron == null || target == null) return;
         if (!(target instanceof PlayerEntity)) return;
 
-        // Вычисляем идеальные углы до цели
+        // Извлекаем смещения
+        float offsetYaw = neuron[0];
+        float offsetPitch = neuron[1];
+        float time = neuron[3];
+        float yawVel = neuron[4];
+        float pitchVel = neuron[5];
+        float noise = neuron[6];
+        float extra = neuron[7];
+
+        // Вычисляем текущий идеальный угол на цель
         Vec3d eyePos = mc.player.getEyePos();
         Vec3d targetPos = target.getPos().add(0, target.getHeight() * 0.5, 0);
         double dx = targetPos.x - eyePos.x;
@@ -384,25 +392,24 @@ public class SpeedMod implements ModInitializer {
         float idealYaw = (float) MathHelper.atan2(dz, dx) * (180F / (float) Math.PI) - 90F;
         float idealPitch = (float) -MathHelper.atan2(dy, dist) * (180F / (float) Math.PI);
 
-        // Извлекаем параметры стиля из нейрона
-        float time = neuron[3];
-        float extra = neuron[9];
+        // Целевой угол = идеальный + твоё смещение
+        float targetYaw = idealYaw + offsetYaw;
+        float targetPitch = idealPitch + offsetPitch;
 
-        // Плавность (из стиля)
+        // Плавность (из стиля – скорость поворота)
         float speedFactor = 0.1f + 0.3f * (float) Math.abs(Math.sin(time * 0.5f));
         float dynamicSmooth = Math.min(1.0f, 0.05f + speedFactor);
 
-        // Микро-рыскания (из стиля)
+        // Микро-рыскания
         float microYaw = (float) Math.sin(playIndex * 0.23f) * 0.03f;
         float microPitch = (float) Math.cos(playIndex * 0.19f + 1.2f) * 0.03f;
 
-        // Случайный шум (вариативность)
+        // Случайный шум
         float jitterYaw = (random.nextFloat() - 0.5f) * 0.01f;
         float jitterPitch = (random.nextFloat() - 0.5f) * 0.01f;
 
-        // Финальные углы = идеальные + стиль
-        float finalYaw = idealYaw + microYaw + jitterYaw;
-        float finalPitch = idealPitch + microPitch + jitterPitch;
+        float finalYaw = targetYaw + microYaw + jitterYaw;
+        float finalPitch = targetPitch + microPitch + jitterPitch;
 
         // Плавный поворот
         float currentYaw = mc.player.getYaw();
