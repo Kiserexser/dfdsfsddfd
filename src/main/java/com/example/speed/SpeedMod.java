@@ -132,12 +132,12 @@ public class SpeedMod implements ModInitializer {
     public void onInitialize() {
         LOGGER.info("KillAura: R - вкл (после обучения), X - учить, C - запомнить, Z - забыть (файлы не удаляются)");
         // При старте загружаем самый свежий файл, если есть
-        Path latest = getLatestSessionFile();
-        if (latest != null) {
-            loadNeuralDataFromFile(latest);
+        Path latestFile = getLatestSessionFile();
+        if (latestFile != null) {
+            loadNeuralDataFromFile(latestFile);
             if (!neuralData.isEmpty()) {
                 isLearned = true;
-                LOGGER.info("Загружено обучение из файла: " + latest.getFileName());
+                LOGGER.info("Загружено обучение из файла: " + latestFile.getFileName());
             }
         }
 
@@ -172,13 +172,13 @@ public class SpeedMod implements ModInitializer {
                                 } else {
                                     // Если стиль есть, но neuralData пуста (был сброс), пытаемся загрузить последний файл
                                     if (neuralData.isEmpty()) {
-                                        Path latest = getLatestSessionFile();
-                                        if (latest != null) {
-                                            loadNeuralDataFromFile(latest);
+                                        Path latestFile2 = getLatestSessionFile();
+                                        if (latestFile2 != null) {
+                                            loadNeuralDataFromFile(latestFile2);
                                             if (!neuralData.isEmpty()) {
                                                 isLearned = true;
                                                 if (mc.player != null)
-                                                    mc.player.sendMessage(Text.literal("§aЗагружен последний сохранённый стиль: " + latest.getFileName()), true);
+                                                    mc.player.sendMessage(Text.literal("§aЗагружен последний сохранённый стиль: " + latestFile2.getFileName()), true);
                                             }
                                         }
                                     }
@@ -197,13 +197,13 @@ public class SpeedMod implements ModInitializer {
                                 }
                             } else {
                                 // Если не обучен, пытаемся загрузить последний файл
-                                Path latest = getLatestSessionFile();
-                                if (latest != null) {
-                                    loadNeuralDataFromFile(latest);
+                                Path latestFile3 = getLatestSessionFile();
+                                if (latestFile3 != null) {
+                                    loadNeuralDataFromFile(latestFile3);
                                     if (!neuralData.isEmpty()) {
                                         isLearned = true;
                                         if (mc.player != null)
-                                            mc.player.sendMessage(Text.literal("§aЗагружен последний сохранённый стиль: " + latest.getFileName()), true);
+                                            mc.player.sendMessage(Text.literal("§aЗагружен последний сохранённый стиль: " + latestFile3.getFileName()), true);
                                         // Теперь включаем режим PLAY
                                         mode = Mode.PLAY;
                                         playIndex = 0;
@@ -247,9 +247,9 @@ public class SpeedMod implements ModInitializer {
                                     mode = Mode.OFF;
                                     isLearned = true;
                                     // Загружаем только что созданный файл (он будет самым новым)
-                                    Path latest = getLatestSessionFile();
-                                    if (latest != null) {
-                                        loadNeuralDataFromFile(latest);
+                                    Path latestFile4 = getLatestSessionFile();
+                                    if (latestFile4 != null) {
+                                        loadNeuralDataFromFile(latestFile4);
                                     }
                                     if (mc.player != null)
                                         mc.player.sendMessage(Text.literal("§aОбучение сохранено в новый файл! Жми R для боя."), true);
@@ -306,7 +306,6 @@ public class SpeedMod implements ModInitializer {
     }
 
     private static void resetLearning() {
-        // Сбрасываем память, но файлы не удаляем
         recordedData.clear();
         neuralData.clear();
         sampleCount = 0;
