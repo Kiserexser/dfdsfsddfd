@@ -55,14 +55,10 @@ public class SpeedMod implements ModInitializer {
 
     private static boolean lastR = false, lastZ = false, lastX = false, lastC = false;
 
-    // === РАБОТА С ФАЙЛАМИ ===
-    private static Path getSessionDir() {
-        return mc.runDirectory.toPath();
-    }
+    private static Path getSessionDir() { return mc.runDirectory.toPath(); }
 
     private static String generateFileName() {
-        String timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss_SSS"));
-        return FILE_PREFIX + timestamp + FILE_EXT;
+        return FILE_PREFIX + LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss_SSS")) + FILE_EXT;
     }
 
     private static Path getLatestSessionFile() {
@@ -128,7 +124,7 @@ public class SpeedMod implements ModInitializer {
 
     @Override
     public void onInitialize() {
-        LOGGER.info("KillAura (копия стиля без дрожи) R - бой, X - учить, C - сохранить, Z - забыть");
+        LOGGER.info("KillAura (фиксация, без интерполяции смещений) R - бой, X - учить, C - сохранить, Z - забыть");
         Path latestFile = getLatestSessionFile();
         if (latestFile != null) {
             loadNeuralDataFromFile(latestFile);
@@ -153,8 +149,7 @@ public class SpeedMod implements ModInitializer {
 
                         if (zPressed && !lastZ) {
                             resetLearning();
-                            if (mc.player != null)
-                                mc.player.sendMessage(Text.literal("§cСтиль забыт (файлы сохранены)."), true);
+                            if (mc.player != null) mc.player.sendMessage(Text.literal("§cСтиль забыт (файлы сохранены)."), true);
                         }
                         lastZ = zPressed;
 
@@ -162,8 +157,8 @@ public class SpeedMod implements ModInitializer {
                             if (isLearned) {
                                 if (mode == Mode.PLAY) {
                                     mode = Mode.OFF;
-                                    if (mc.player != null)
-                                        mc.player.sendMessage(Text.literal("§cKillAura выключена"), true);
+                                    lockedTarget = null;
+                                    if (mc.player != null) mc.player.sendMessage(Text.literal("§cKillAura выключена"), true);
                                 } else {
                                     if (neuralData.isEmpty()) {
                                         Path latest = getLatestSessionFile();
@@ -181,11 +176,10 @@ public class SpeedMod implements ModInitializer {
                                         playIndex = 0;
                                         lastYaw = mc.player.getYaw();
                                         lastPitch = mc.player.getPitch();
-                                        if (mc.player != null)
-                                            mc.player.sendMessage(Text.literal("§aKillAura включена (твой стиль)"), true);
+                                        lockedTarget = null;
+                                        if (mc.player != null) mc.player.sendMessage(Text.literal("§aKillAura включена (твой стиль)"), true);
                                     } else {
-                                        if (mc.player != null)
-                                            mc.player.sendMessage(Text.literal("§cНет сохранённого стиля. Пройди обучение (X → бой → C)."), true);
+                                        if (mc.player != null) mc.player.sendMessage(Text.literal("§cНет сохранённого стиля."), true);
                                         isLearned = false;
                                     }
                                 }
@@ -195,21 +189,18 @@ public class SpeedMod implements ModInitializer {
                                     loadNeuralDataFromFile(latest);
                                     if (!neuralData.isEmpty()) {
                                         isLearned = true;
-                                        if (mc.player != null)
-                                            mc.player.sendMessage(Text.literal("§aЗагружен последний стиль: " + latest.getFileName()), true);
+                                        if (mc.player != null) mc.player.sendMessage(Text.literal("§aЗагружен последний стиль: " + latest.getFileName()), true);
                                         mode = Mode.PLAY;
                                         playIndex = 0;
                                         lastYaw = mc.player.getYaw();
                                         lastPitch = mc.player.getPitch();
-                                        if (mc.player != null)
-                                            mc.player.sendMessage(Text.literal("§aKillAura включена"), true);
+                                        lockedTarget = null;
+                                        if (mc.player != null) mc.player.sendMessage(Text.literal("§aKillAura включена"), true);
                                     } else {
-                                        if (mc.player != null)
-                                            mc.player.sendMessage(Text.literal("§cНет сохранённого стиля. Пройди обучение (X → бой → C)."), true);
+                                        if (mc.player != null) mc.player.sendMessage(Text.literal("§cНет сохранённого стиля. Пройди обучение (X → бой → C)."), true);
                                     }
                                 } else {
-                                    if (mc.player != null)
-                                        mc.player.sendMessage(Text.literal("§cСначала обучи: X → бой → C"), true);
+                                    if (mc.player != null) mc.player.sendMessage(Text.literal("§cСначала обучи: X → бой → C"), true);
                                 }
                             }
                         }
@@ -221,51 +212,54 @@ public class SpeedMod implements ModInitializer {
                             recordStartTime = System.currentTimeMillis();
                             currentSessionId = String.valueOf(System.currentTimeMillis());
                             mode = Mode.LEARN;
-                            if (mc.player != null)
-                                mc.player.sendMessage(Text.literal("§aЗапись начата! Играй как обычно."), true);
+                            lockedTarget = null;
+                            if (mc.player != null) mc.player.sendMessage(Text.literal("§aЗапись начата! Играй как обычно."), true);
                         }
                         lastX = xPressed;
 
                         if (cPressed && !lastC) {
                             if (mode == Mode.LEARN) {
                                 if (sampleCount < MIN_SAMPLES) {
-                                    if (mc.player != null)
-                                        mc.player.sendMessage(Text.literal("§cСлишком мало данных! Нанеси больше ударов."), true);
+                                    if (mc.player != null) mc.player.sendMessage(Text.literal("§cСлишком мало данных!"), true);
                                     mode = Mode.OFF;
                                 } else {
                                     saveNeuralDataToNewFile();
                                     mode = Mode.OFF;
                                     isLearned = true;
+                                    lockedTarget = null;
                                     Path latest = getLatestSessionFile();
-                                    if (latest != null) {
-                                        loadNeuralDataFromFile(latest);
-                                    }
-                                    if (mc.player != null)
-                                        mc.player.sendMessage(Text.literal("§aСтиль сохранён! Жми R для боя."), true);
+                                    if (latest != null) loadNeuralDataFromFile(latest);
+                                    if (mc.player != null) mc.player.sendMessage(Text.literal("§aСтиль сохранён! Жми R."), true);
                                 }
                             } else {
-                                if (mc.player != null)
-                                    mc.player.sendMessage(Text.literal("§cСейчас не идёт обучение. Нажми X."), true);
+                                if (mc.player != null) mc.player.sendMessage(Text.literal("§cНажми X для обучения."), true);
                             }
                         }
                         lastC = cPressed;
 
-                        // === ЛОГИКА ===
+                        // === PLAY ===
                         if (mode == Mode.PLAY && isLearned && !neuralData.isEmpty()) {
-                            PlayerEntity target = getTargetPlayer();
-                            if (target == null) { lockedTarget = null; return; }
+                            PlayerEntity target = lockedTarget;
+                            if (target == null || target.isDead() || !target.isAlive() || mc.player.distanceTo(target) > SEARCH_RANGE) {
+                                target = getTargetPlayer();
+                                if (target != null) lockedTarget = target;
+                                else { lockedTarget = null; return; }
+                            }
+
                             double dist = mc.player.distanceTo(target);
                             if (dist > SEARCH_RANGE) { lockedTarget = null; return; }
-                            lockedTarget = target;
 
-                            float[] neuron = getInterpolatedSample();
+                            // Берём текущий сэмпл без интерполяции смещения, используем точное значение
+                            if (playIndex >= neuralData.size()) playIndex = 0;
+                            float[] neuron = neuralData.get(playIndex);
                             if (neuron != null) {
-                                applyStyledNeuron(neuron, target);
+                                applyStyledNeuronDirect(neuron, target);
                                 playIndex++;
                             }
                             return;
                         }
 
+                        // === LEARN ===
                         if (mode == Mode.LEARN) {
                             PlayerEntity target = getTargetPlayer();
                             if (target == null) return;
@@ -280,8 +274,7 @@ public class SpeedMod implements ModInitializer {
                                     mc.player.sendMessage(Text.literal("§7Записано " + sampleCount + " сэмплов"), true);
                                 }
                             } else {
-                                if (mc.player != null)
-                                    mc.player.sendMessage(Text.literal("§cЛимит, нажми C"), true);
+                                if (mc.player != null) mc.player.sendMessage(Text.literal("§cЛимит, нажми C"), true);
                                 mode = Mode.OFF;
                             }
                         }
@@ -300,6 +293,7 @@ public class SpeedMod implements ModInitializer {
         sampleCount = 0;
         isLearned = false;
         mode = Mode.OFF;
+        lockedTarget = null;
         LOGGER.info("Стиль забыт (файлы сохранены)");
     }
 
@@ -313,7 +307,6 @@ public class SpeedMod implements ModInitializer {
         return players.isEmpty() ? null : players.get(0);
     }
 
-    // === ЗАПИСЬ СМЕЩЕНИЙ И СКОРОСТИ ===
     private static float[] captureFullSample(LivingEntity target) {
         Vec3d eyePos = mc.player.getEyePos();
         Vec3d targetPos = target.getPos().add(0, target.getHeight() * 0.5, 0);
@@ -338,47 +331,23 @@ public class SpeedMod implements ModInitializer {
 
         float time = (float) (System.currentTimeMillis() - recordStartTime) / 1000f;
 
-        // Нет искусственного шума – только реальные данные
         return new float[]{
-            offsetYaw,
-            offsetPitch,
-            (float) dist,
-            time,
-            yawSpeed,
-            pitchSpeed,
-            0f, // шум убран
-            0f  // extra убран
+            offsetYaw, offsetPitch, (float) dist, time,
+            yawSpeed, pitchSpeed, 0f, 0f
         };
     }
 
-    private static float[] getInterpolatedSample() {
-        if (neuralData.isEmpty()) return null;
-        int idx = playIndex % neuralData.size();
-        int nextIdx = (idx + 1) % neuralData.size();
-        float[] curr = neuralData.get(idx);
-        float[] next = neuralData.get(nextIdx);
-        float t = 0.5f + 0.4f * (float) Math.sin(playIndex * 0.07f);
-        float[] result = new float[8];
-        for (int i = 0; i < 8; i++) {
-            result[i] = curr[i] + (next[i] - curr[i]) * t * 0.5f;
-        }
-        // Убираем все лишние колебания – только чистая интерполяция
-        return result;
-    }
-
-    // === ВОСПРОИЗВЕДЕНИЕ БЕЗ ДРОЖИ ===
-    private static void applyStyledNeuron(float[] neuron, LivingEntity target) {
+    // Прямое применение сэмпла без интерполяции смещения – для точных попаданий при беге
+    private static void applyStyledNeuronDirect(float[] neuron, LivingEntity target) {
         if (neuron == null || target == null) return;
         if (!(target instanceof PlayerEntity)) return;
 
-        // Извлекаем параметры
         float offsetYaw = neuron[0];
         float offsetPitch = neuron[1];
         float time = neuron[3];
         float yawSpeed = neuron[4];
         float pitchSpeed = neuron[5];
 
-        // Вычисляем идеальный угол на цель
         Vec3d eyePos = mc.player.getEyePos();
         Vec3d targetPos = target.getPos().add(0, target.getHeight() * 0.5, 0);
         double dx = targetPos.x - eyePos.x;
@@ -389,11 +358,11 @@ public class SpeedMod implements ModInitializer {
         float idealYaw = (float) MathHelper.atan2(dz, dx) * (180F / (float) Math.PI) - 90F;
         float idealPitch = (float) -MathHelper.atan2(dy, dist) * (180F / (float) Math.PI);
 
-        // Целевой угол = идеальный + твоё смещение (без шума)
+        // Целевой угол без сглаживания смещения – точное попадание
         float targetYaw = idealYaw + offsetYaw;
         float targetPitch = idealPitch + offsetPitch;
 
-        // Плавность из записи (скорость поворота)
+        // Плавность поворота из записи (без интерполяции смещения)
         float smooth = 0.05f + 0.3f * (float) Math.abs(Math.sin(time * 0.5f));
         float dynamicSmooth = Math.min(1.0f, smooth);
 
@@ -402,7 +371,6 @@ public class SpeedMod implements ModInitializer {
         mc.player.setYaw(lerpAngle(currentYaw, targetYaw, dynamicSmooth));
         mc.player.setPitch(lerpAngle(currentPitch, targetPitch, dynamicSmooth));
 
-        // Атака с задержкой из стиля (без лишнего разброса)
         long now = System.currentTimeMillis();
         float baseDelay = 0.500f + 0.250f * (float) Math.abs(Math.sin(time * 1.3f));
         long delayMs = (long) (baseDelay * 1000);
