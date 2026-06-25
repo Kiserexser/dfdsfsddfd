@@ -368,30 +368,49 @@ public class SpeedMod implements ModInitializer {
         return result;
     }
 
+    // === ИСПРАВЛЕННЫЙ applyStyledNeuron (НАВОДИТСЯ НА ЦЕЛЬ) ===
     private static void applyStyledNeuron(float[] neuron, LivingEntity target) {
         if (neuron == null || target == null) return;
         if (!(target instanceof PlayerEntity)) return;
 
-        float targetYaw = neuron[0];
-        float targetPitch = neuron[1];
+        // Вычисляем идеальные углы до цели
+        Vec3d eyePos = mc.player.getEyePos();
+        Vec3d targetPos = target.getPos().add(0, target.getHeight() * 0.5, 0);
+        double dx = targetPos.x - eyePos.x;
+        double dy = targetPos.y - eyePos.y;
+        double dz = targetPos.z - eyePos.z;
+        double dist = Math.sqrt(dx * dx + dz * dz);
+
+        float idealYaw = (float) MathHelper.atan2(dz, dx) * (180F / (float) Math.PI) - 90F;
+        float idealPitch = (float) -MathHelper.atan2(dy, dist) * (180F / (float) Math.PI);
+
+        // Извлекаем параметры стиля из нейрона
         float time = neuron[3];
         float extra = neuron[9];
 
+        // Плавность (из стиля)
         float speedFactor = 0.1f + 0.3f * (float) Math.abs(Math.sin(time * 0.5f));
         float dynamicSmooth = Math.min(1.0f, 0.05f + speedFactor);
 
-        float currentYaw = mc.player.getYaw();
-        float currentPitch = mc.player.getPitch();
-
+        // Микро-рыскания (из стиля)
         float microYaw = (float) Math.sin(playIndex * 0.23f) * 0.03f;
         float microPitch = (float) Math.cos(playIndex * 0.19f + 1.2f) * 0.03f;
 
-        float finalYaw = targetYaw + (random.nextFloat() - 0.5f) * 0.01f + microYaw;
-        float finalPitch = targetPitch + (random.nextFloat() - 0.5f) * 0.01f + microPitch;
+        // Случайный шум (вариативность)
+        float jitterYaw = (random.nextFloat() - 0.5f) * 0.01f;
+        float jitterPitch = (random.nextFloat() - 0.5f) * 0.01f;
 
+        // Финальные углы = идеальные + стиль
+        float finalYaw = idealYaw + microYaw + jitterYaw;
+        float finalPitch = idealPitch + microPitch + jitterPitch;
+
+        // Плавный поворот
+        float currentYaw = mc.player.getYaw();
+        float currentPitch = mc.player.getPitch();
         mc.player.setYaw(lerpAngle(currentYaw, finalYaw, dynamicSmooth));
         mc.player.setPitch(lerpAngle(currentPitch, finalPitch, dynamicSmooth));
 
+        // Атака с задержками из стиля
         long now = System.currentTimeMillis();
         float baseDelay = 0.500f + (float) Math.abs(Math.sin(time * 1.3f)) * 0.300f;
         float randomShift = (random.nextFloat() - 0.5f) * 0.150f;
