@@ -128,13 +128,13 @@ public class SpeedMod implements ModInitializer {
 
     @Override
     public void onInitialize() {
-        LOGGER.info("🎯 FULL-STYLE KillAura: R - бой, X - учить, C - сохранить, Z - забыть");
+        LOGGER.info("KillAura (копия стиля без дрожи) R - бой, X - учить, C - сохранить, Z - забыть");
         Path latestFile = getLatestSessionFile();
         if (latestFile != null) {
             loadNeuralDataFromFile(latestFile);
             if (!neuralData.isEmpty()) {
                 isLearned = true;
-                LOGGER.info("✅ Загружено обучение из файла: " + latestFile.getFileName());
+                LOGGER.info("Загружено обучение из файла: " + latestFile.getFileName());
             }
         }
 
@@ -151,7 +151,6 @@ public class SpeedMod implements ModInitializer {
                         boolean xPressed = GLFW.glfwGetKey(window, LEARN_KEY) == GLFW.GLFW_PRESS;
                         boolean cPressed = GLFW.glfwGetKey(window, STOP_LEARN_KEY) == GLFW.GLFW_PRESS;
 
-                        // Z – забыть стиль (файлы не удаляются)
                         if (zPressed && !lastZ) {
                             resetLearning();
                             if (mc.player != null)
@@ -159,7 +158,6 @@ public class SpeedMod implements ModInitializer {
                         }
                         lastZ = zPressed;
 
-                        // R – включить KillAura (автозагрузка последнего файла, если нет стиля)
                         if (rPressed && !lastR) {
                             if (isLearned) {
                                 if (mode == Mode.PLAY) {
@@ -184,7 +182,7 @@ public class SpeedMod implements ModInitializer {
                                         lastYaw = mc.player.getYaw();
                                         lastPitch = mc.player.getPitch();
                                         if (mc.player != null)
-                                            mc.player.sendMessage(Text.literal("§aKillAura включена (твой полный стиль)"), true);
+                                            mc.player.sendMessage(Text.literal("§aKillAura включена (твой стиль)"), true);
                                     } else {
                                         if (mc.player != null)
                                             mc.player.sendMessage(Text.literal("§cНет сохранённого стиля. Пройди обучение (X → бой → C)."), true);
@@ -217,7 +215,6 @@ public class SpeedMod implements ModInitializer {
                         }
                         lastR = rPressed;
 
-                        // X – начать обучение (очищаем временную запись)
                         if (xPressed && !lastX) {
                             recordedData.clear();
                             sampleCount = 0;
@@ -225,11 +222,10 @@ public class SpeedMod implements ModInitializer {
                             currentSessionId = String.valueOf(System.currentTimeMillis());
                             mode = Mode.LEARN;
                             if (mc.player != null)
-                                mc.player.sendMessage(Text.literal("§aЗапись стиля начата! Играй как обычно."), true);
+                                mc.player.sendMessage(Text.literal("§aЗапись начата! Играй как обычно."), true);
                         }
                         lastX = xPressed;
 
-                        // C – сохранить обучение в НОВЫЙ файл
                         if (cPressed && !lastC) {
                             if (mode == Mode.LEARN) {
                                 if (sampleCount < MIN_SAMPLES) {
@@ -240,13 +236,12 @@ public class SpeedMod implements ModInitializer {
                                     saveNeuralDataToNewFile();
                                     mode = Mode.OFF;
                                     isLearned = true;
-                                    // Загружаем только что созданный файл
                                     Path latest = getLatestSessionFile();
                                     if (latest != null) {
                                         loadNeuralDataFromFile(latest);
                                     }
                                     if (mc.player != null)
-                                        mc.player.sendMessage(Text.literal("§aСтиль сохранён в новый файл! Жми R для боя."), true);
+                                        mc.player.sendMessage(Text.literal("§aСтиль сохранён! Жми R для боя."), true);
                                 }
                             } else {
                                 if (mc.player != null)
@@ -255,7 +250,7 @@ public class SpeedMod implements ModInitializer {
                         }
                         lastC = cPressed;
 
-                        // === ЛОГИКА РЕЖИМОВ ===
+                        // === ЛОГИКА ===
                         if (mode == Mode.PLAY && isLearned && !neuralData.isEmpty()) {
                             PlayerEntity target = getTargetPlayer();
                             if (target == null) { lockedTarget = null; return; }
@@ -318,89 +313,72 @@ public class SpeedMod implements ModInitializer {
         return players.isEmpty() ? null : players.get(0);
     }
 
-    // === ЗАПИСЬ ПОЛНОГО СТИЛЯ ===
+    // === ЗАПИСЬ СМЕЩЕНИЙ И СКОРОСТИ ===
     private static float[] captureFullSample(LivingEntity target) {
         Vec3d eyePos = mc.player.getEyePos();
-        // Целимся в центр тела (можно изменить на голову – но мы сохраняем смещение)
         Vec3d targetPos = target.getPos().add(0, target.getHeight() * 0.5, 0);
         double dx = targetPos.x - eyePos.x;
         double dy = targetPos.y - eyePos.y;
         double dz = targetPos.z - eyePos.z;
         double dist = Math.sqrt(dx * dx + dz * dz);
 
-        // Идеальный угол (центр тела)
         float idealYaw = (float) MathHelper.atan2(dz, dx) * (180F / (float) Math.PI) - 90F;
         float idealPitch = (float) -MathHelper.atan2(dy, dist) * (180F / (float) Math.PI);
 
-        // Текущий реальный угол игрока
         float curYaw = mc.player.getYaw();
         float curPitch = mc.player.getPitch();
 
-        // Смещение = твой реальный угол минус идеальный
         float offsetYaw = curYaw - idealYaw;
         float offsetPitch = curPitch - idealPitch;
 
-        // Скорость поворота (для плавности)
         float yawSpeed = curYaw - lastYaw;
         float pitchSpeed = curPitch - lastPitch;
         lastYaw = curYaw;
         lastPitch = curPitch;
 
-        // Время с начала записи (в секундах)
         float time = (float) (System.currentTimeMillis() - recordStartTime) / 1000f;
 
-        // Естественный шум (дрожание, микро-коррекции)
-        float noise = (float) Math.sin(time * 2.5f) * 0.05f + (random.nextFloat() - 0.5f) * 0.03f;
-
-        // Дополнительная случайная вариация (для индивидуальности)
-        float extra = (float) (Math.random() * 0.1f);
-
+        // Нет искусственного шума – только реальные данные
         return new float[]{
-            offsetYaw,       // 0
-            offsetPitch,     // 1
-            (float) dist,    // 2
-            time,            // 3
-            yawSpeed,        // 4
-            pitchSpeed,      // 5
-            noise,           // 6
-            extra            // 7
+            offsetYaw,
+            offsetPitch,
+            (float) dist,
+            time,
+            yawSpeed,
+            pitchSpeed,
+            0f, // шум убран
+            0f  // extra убран
         };
     }
 
-    // === ИНТЕРПОЛЯЦИЯ МЕЖДУ СЭМПЛАМИ ===
     private static float[] getInterpolatedSample() {
         if (neuralData.isEmpty()) return null;
         int idx = playIndex % neuralData.size();
         int nextIdx = (idx + 1) % neuralData.size();
         float[] curr = neuralData.get(idx);
         float[] next = neuralData.get(nextIdx);
-        // Плавное переключение между соседними сэмплами
         float t = 0.5f + 0.4f * (float) Math.sin(playIndex * 0.07f);
         float[] result = new float[8];
         for (int i = 0; i < 8; i++) {
             result[i] = curr[i] + (next[i] - curr[i]) * t * 0.5f;
         }
-        // Добавляем микро-колебания для естественности
-        result[0] += (float) Math.sin(playIndex * 0.13f) * 0.02f;
-        result[1] += (float) Math.cos(playIndex * 0.17f) * 0.02f;
+        // Убираем все лишние колебания – только чистая интерполяция
         return result;
     }
 
-    // === ВОСПРОИЗВЕДЕНИЕ ПОЛНОГО СТИЛЯ ===
+    // === ВОСПРОИЗВЕДЕНИЕ БЕЗ ДРОЖИ ===
     private static void applyStyledNeuron(float[] neuron, LivingEntity target) {
         if (neuron == null || target == null) return;
         if (!(target instanceof PlayerEntity)) return;
 
-        // Извлекаем параметры стиля
+        // Извлекаем параметры
         float offsetYaw = neuron[0];
         float offsetPitch = neuron[1];
         float time = neuron[3];
         float yawSpeed = neuron[4];
         float pitchSpeed = neuron[5];
-        float noise = neuron[6];
-        float extra = neuron[7];
 
-        // Вычисляем идеальный угол на текущую цель (центр тела)
+        // Вычисляем идеальный угол на цель
         Vec3d eyePos = mc.player.getEyePos();
         Vec3d targetPos = target.getPos().add(0, target.getHeight() * 0.5, 0);
         double dx = targetPos.x - eyePos.x;
@@ -411,38 +389,23 @@ public class SpeedMod implements ModInitializer {
         float idealYaw = (float) MathHelper.atan2(dz, dx) * (180F / (float) Math.PI) - 90F;
         float idealPitch = (float) -MathHelper.atan2(dy, dist) * (180F / (float) Math.PI);
 
-        // Целевой угол = идеальный + твоё смещение + микро-коррекции
-        float targetYaw = idealYaw + offsetYaw + noise * 0.3f;
-        float targetPitch = idealPitch + offsetPitch + noise * 0.2f;
+        // Целевой угол = идеальный + твоё смещение (без шума)
+        float targetYaw = idealYaw + offsetYaw;
+        float targetPitch = idealPitch + offsetPitch;
 
-        // Плавность поворота (используем твою скорость из записи)
+        // Плавность из записи (скорость поворота)
         float smooth = 0.05f + 0.3f * (float) Math.abs(Math.sin(time * 0.5f));
         float dynamicSmooth = Math.min(1.0f, smooth);
 
-        // Микро-рыскания (естественные колебания)
-        float microYaw = (float) Math.sin(playIndex * 0.23f) * 0.02f;
-        float microPitch = (float) Math.cos(playIndex * 0.19f + 1.2f) * 0.02f;
-
-        // Случайный джиттер для вариативности (но в рамках стиля)
-        float jitterYaw = (random.nextFloat() - 0.5f) * 0.005f;
-        float jitterPitch = (random.nextFloat() - 0.5f) * 0.005f;
-
-        float finalYaw = targetYaw + microYaw + jitterYaw;
-        float finalPitch = targetPitch + microPitch + jitterPitch;
-
-        // Плавный поворот
         float currentYaw = mc.player.getYaw();
         float currentPitch = mc.player.getPitch();
-        mc.player.setYaw(lerpAngle(currentYaw, finalYaw, dynamicSmooth));
-        mc.player.setPitch(lerpAngle(currentPitch, finalPitch, dynamicSmooth));
+        mc.player.setYaw(lerpAngle(currentYaw, targetYaw, dynamicSmooth));
+        mc.player.setPitch(lerpAngle(currentPitch, targetPitch, dynamicSmooth));
 
-        // === АТАКА С ЗАДЕРЖКАМИ ИЗ СТИЛЯ ===
+        // Атака с задержкой из стиля (без лишнего разброса)
         long now = System.currentTimeMillis();
-
-        // Базовая задержка вычисляется из времени записи (твой ритм)
-        float baseDelay = 0.500f + 0.300f * (float) Math.abs(Math.sin(time * 1.3f));
-        float randomShift = (random.nextFloat() - 0.5f) * 0.150f;
-        long delayMs = (long) ((baseDelay + randomShift + extra * 0.2f) * 1000);
+        float baseDelay = 0.500f + 0.250f * (float) Math.abs(Math.sin(time * 1.3f));
+        long delayMs = (long) (baseDelay * 1000);
 
         if (now - lastAttackTime >= delayMs && target.isAlive() && !target.isDead()) {
             double realDist = mc.player.distanceTo(target);
@@ -451,11 +414,6 @@ public class SpeedMod implements ModInitializer {
                 mc.interactionManager.attackEntity(mc.player, target);
                 mc.player.swingHand(mc.player.getActiveHand());
                 lastAttackTime = now;
-
-                // Иногда пропускаем удар (как человек)
-                if (random.nextFloat() < 0.04f + extra * 0.1f) {
-                    lastAttackTime = now + 120;
-                }
             }
         }
     }
