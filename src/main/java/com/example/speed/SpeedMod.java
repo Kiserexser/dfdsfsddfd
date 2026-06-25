@@ -14,6 +14,9 @@ import org.slf4j.LoggerFactory;
 
 import java.io.*;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.*;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.concurrent.ConcurrentLinkedQueue;
 
@@ -24,6 +27,8 @@ public class SpeedMod implements ModInitializer {
     private static final double SEARCH_RANGE = 5.0;
     private static final double ATTACK_RANGE = 3.0;
     private static final int MIN_SAMPLES = 50;
+    private static final String FILE_PREFIX = "killaura_style_";
+    private static final String FILE_EXT = ".txt";
 
     private static enum Mode { OFF, LEARN, PLAY }
     private static Mode mode = Mode.OFF;
@@ -34,7 +39,6 @@ public class SpeedMod implements ModInitializer {
     private static String currentSessionId = "";
     private static int sampleCount = 0;
     private static final int MAX_SAMPLES = 10000;
-    private static final String DATA_FILE = "killaura_style.txt";
 
     private static List<float[]> neuralData = new ArrayList<>();
     private static int playIndex = 0;
@@ -51,13 +55,90 @@ public class SpeedMod implements ModInitializer {
 
     private static boolean lastR = false, lastZ = false, lastX = false, lastC = false;
 
+    // === РАБОТА С ФАЙЛАМИ ===
+    private static Path getSessionDir() {
+        return mc.runDirectory.toPath();
+    }
+
+    private static String generateFileName() {
+        String timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss_SSS"));
+        return FILE_PREFIX + timestamp + FILE_EXT;
+    }
+
+    private static Path getLatestSessionFile() {
+        try (DirectoryStream<Path> stream = Files.newDirectoryStream(getSessionDir(), FILE_PREFIX + "*" + FILE_EXT)) {
+            Path latest = null;
+            long latestTime = 0;
+            for (Path entry : stream) {
+                long modTime = Files.getLastModifiedTime(entry).toMillis();
+                if (modTime > latestTime) {
+                    latestTime = modTime;
+                    latest = entry;
+                }
+            }
+            return latest;
+        } catch (IOException e) {
+            LOGGER.error("Ошибка поиска файлов сессий", e);
+            return null;
+        }
+    }
+
+    private static void loadNeuralDataFromFile(Path file) {
+        if (file == null || !Files.exists(file)) return;
+        neuralData.clear();
+        try (BufferedReader reader = Files.newBufferedReader(file, StandardCharsets.UTF_8)) {
+            String line;
+            boolean inSession = false;
+            while ((line = reader.readLine()) != null) {
+                if (line.startsWith("===SESSION")) { inSession = true; continue; }
+                if (line.startsWith("===END===")) { inSession = false; continue; }
+                if (inSession && !line.startsWith("SAMPLES:")) {
+                    String[] parts = line.split(",");
+                    if (parts.length >= 10) {
+                        float[] sample = new float[10];
+                        for (int i = 0; i < 10; i++) sample[i] = Float.parseFloat(parts[i]);
+                        neuralData.add(sample);
+                    }
+                }
+            }
+            LOGGER.info("Загружено " + neuralData.size() + " сэмплов из " + file.getFileName());
+        } catch (IOException e) {
+            LOGGER.error("Ошибка загрузки файла", e);
+        }
+    }
+
+    private static void saveNeuralDataToNewFile() {
+        if (recordedData.isEmpty()) return;
+        Path newFile = getSessionDir().resolve(generateFileName());
+        try (PrintWriter writer = new PrintWriter(Files.newBufferedWriter(newFile, StandardCharsets.UTF_8))) {
+            writer.println("===SESSION " + currentSessionId + "===");
+            writer.println("SAMPLES:" + sampleCount);
+            for (float[] sample : recordedData) {
+                for (float val : sample) {
+                    writer.print(val + ",");
+                }
+                writer.println();
+            }
+            writer.println("===END===");
+            LOGGER.info("Сохранено " + sampleCount + " сэмплов в " + newFile.getFileName());
+        } catch (IOException e) {
+            LOGGER.error("Ошибка сохранения", e);
+        }
+    }
+
+    // === ОСТАЛЬНЫЕ МЕТОДЫ ===
+
     @Override
     public void onInitialize() {
-        LOGGER.info("KillAura: R - вкл (после обучения), X - учить, C - запомнить, Z - забыть");
-        loadNeuralData();
-        if (!neuralData.isEmpty()) {
-            isLearned = true;
-            LOGGER.info("Загружено обучение из файла");
+        LOGGER.info("KillAura: R - вкл (после обучения), X - учить, C - запомнить, Z - забыть (файлы не удаляются)");
+        // При старте загружаем самый свежий файл, если есть
+        Path latest = getLatestSessionFile();
+        if (latest != null) {
+            loadNeuralDataFromFile(latest);
+            if (!neuralData.isEmpty()) {
+                isLearned = true;
+                LOGGER.info("Загружено обучение из файла: " + latest.getFileName());
+            }
         }
 
         new Thread(() -> {
@@ -73,13 +154,15 @@ public class SpeedMod implements ModInitializer {
                         boolean xPressed = GLFW.glfwGetKey(window, LEARN_KEY) == GLFW.GLFW_PRESS;
                         boolean cPressed = GLFW.glfwGetKey(window, STOP_LEARN_KEY) == GLFW.GLFW_PRESS;
 
+                        // Z – сброс (забываем текущий стиль, но файлы не удаляем)
                         if (zPressed && !lastZ) {
                             resetLearning();
                             if (mc.player != null)
-                                mc.player.sendMessage(Text.literal("§cОбучение сброшено!"), true);
+                                mc.player.sendMessage(Text.literal("§cОбучение забыто! Файлы сохранены."), true);
                         }
                         lastZ = zPressed;
 
+                        // R – боевой режим
                         if (rPressed && !lastR) {
                             if (isLearned) {
                                 if (mode == Mode.PLAY) {
@@ -87,26 +170,60 @@ public class SpeedMod implements ModInitializer {
                                     if (mc.player != null)
                                         mc.player.sendMessage(Text.literal("§cKillAura выключена"), true);
                                 } else {
+                                    // Если стиль есть, но neuralData пуста (был сброс), пытаемся загрузить последний файл
                                     if (neuralData.isEmpty()) {
-                                        if (mc.player != null)
-                                            mc.player.sendMessage(Text.literal("§cОшибка: данные обучения отсутствуют. Пройди обучение заново."), true);
-                                        isLearned = false;
-                                    } else {
+                                        Path latest = getLatestSessionFile();
+                                        if (latest != null) {
+                                            loadNeuralDataFromFile(latest);
+                                            if (!neuralData.isEmpty()) {
+                                                isLearned = true;
+                                                if (mc.player != null)
+                                                    mc.player.sendMessage(Text.literal("§aЗагружен последний сохранённый стиль: " + latest.getFileName()), true);
+                                            }
+                                        }
+                                    }
+                                    if (!neuralData.isEmpty()) {
                                         mode = Mode.PLAY;
                                         playIndex = 0;
                                         lastYaw = mc.player.getYaw();
                                         lastPitch = mc.player.getPitch();
                                         if (mc.player != null)
                                             mc.player.sendMessage(Text.literal("§aKillAura включена (твой стиль)"), true);
+                                    } else {
+                                        if (mc.player != null)
+                                            mc.player.sendMessage(Text.literal("§cНет сохранённого стиля. Пройди обучение (X → бой → C)."), true);
+                                        isLearned = false;
                                     }
                                 }
                             } else {
-                                if (mc.player != null)
-                                    mc.player.sendMessage(Text.literal("§cСначала обучи: X → бой → C"), true);
+                                // Если не обучен, пытаемся загрузить последний файл
+                                Path latest = getLatestSessionFile();
+                                if (latest != null) {
+                                    loadNeuralDataFromFile(latest);
+                                    if (!neuralData.isEmpty()) {
+                                        isLearned = true;
+                                        if (mc.player != null)
+                                            mc.player.sendMessage(Text.literal("§aЗагружен последний сохранённый стиль: " + latest.getFileName()), true);
+                                        // Теперь включаем режим PLAY
+                                        mode = Mode.PLAY;
+                                        playIndex = 0;
+                                        lastYaw = mc.player.getYaw();
+                                        lastPitch = mc.player.getPitch();
+                                        if (mc.player != null)
+                                            mc.player.sendMessage(Text.literal("§aKillAura включена (загружен стиль)"), true);
+                                    } else {
+                                        if (mc.player != null)
+                                            mc.player.sendMessage(Text.literal("§cНет сохранённого стиля. Пройди обучение (X → бой → C)."), true);
+                                    }
+                                } else {
+                                    if (mc.player != null)
+                                        mc.player.sendMessage(Text.literal("§cСначала обучи: X → бой → C"), true);
+                                }
                             }
                         }
                         lastR = rPressed;
 
+                        // X – начать обучение (очищаем текущую запись, но старые файлы не трогаем)
                         if (xPressed && !lastX) {
                             recordedData.clear();
                             sampleCount = 0;
@@ -118,6 +235,7 @@ public class SpeedMod implements ModInitializer {
                         }
                         lastX = xPressed;
 
+                        // C – сохранить обучение в НОВЫЙ файл
                         if (cPressed && !lastC) {
                             if (mode == Mode.LEARN) {
                                 if (sampleCount < MIN_SAMPLES) {
@@ -125,11 +243,16 @@ public class SpeedMod implements ModInitializer {
                                         mc.player.sendMessage(Text.literal("§cСлишком мало данных! Нанеси больше ударов."), true);
                                     mode = Mode.OFF;
                                 } else {
-                                    saveNeuralData();
+                                    saveNeuralDataToNewFile();
                                     mode = Mode.OFF;
                                     isLearned = true;
+                                    // Загружаем только что созданный файл (он будет самым новым)
+                                    Path latest = getLatestSessionFile();
+                                    if (latest != null) {
+                                        loadNeuralDataFromFile(latest);
+                                    }
                                     if (mc.player != null)
-                                        mc.player.sendMessage(Text.literal("§aОбучение сохранено! Жми R для боя."), true);
+                                        mc.player.sendMessage(Text.literal("§aОбучение сохранено в новый файл! Жми R для боя."), true);
                                 }
                             } else {
                                 if (mc.player != null)
@@ -141,15 +264,9 @@ public class SpeedMod implements ModInitializer {
                         // === ЛОГИКА РЕЖИМОВ ===
                         if (mode == Mode.PLAY && isLearned && !neuralData.isEmpty()) {
                             PlayerEntity target = getTargetPlayer();
-                            if (target == null) {
-                                lockedTarget = null;
-                                return;
-                            }
+                            if (target == null) { lockedTarget = null; return; }
                             double dist = mc.player.distanceTo(target);
-                            if (dist > SEARCH_RANGE) {
-                                lockedTarget = null;
-                                return;
-                            }
+                            if (dist > SEARCH_RANGE) { lockedTarget = null; return; }
                             lockedTarget = target;
 
                             float[] neuron = getInterpolatedSample();
@@ -189,16 +306,16 @@ public class SpeedMod implements ModInitializer {
     }
 
     private static void resetLearning() {
+        // Сбрасываем память, но файлы не удаляем
         recordedData.clear();
         neuralData.clear();
         sampleCount = 0;
         isLearned = false;
         mode = Mode.OFF;
-        try { new File(DATA_FILE).delete(); } catch (Exception ignored) {}
-        LOGGER.info("Обучение сброшено");
+        LOGGER.info("Обучение забыто (файлы сохранены)");
     }
 
-    // === ПОИСК ТОЛЬКО ИГРОКОВ ===
+    // === ПОИСК ИГРОКОВ ===
     private static PlayerEntity getTargetPlayer() {
         if (mc.player == null || mc.world == null) return null;
         Box box = mc.player.getBoundingBox().expand(SEARCH_RANGE);
@@ -252,10 +369,8 @@ public class SpeedMod implements ModInitializer {
         return result;
     }
 
-    // === АТАКА ТОЛЬКО ПО ЖИВОМУ ИГРОКУ В РАДИУСЕ ===
     private static void applyStyledNeuron(float[] neuron, LivingEntity target) {
         if (neuron == null || target == null) return;
-        // Дополнительная проверка, что цель – именно игрок
         if (!(target instanceof PlayerEntity)) return;
 
         float targetYaw = neuron[0];
@@ -283,60 +398,18 @@ public class SpeedMod implements ModInitializer {
         float randomShift = (random.nextFloat() - 0.5f) * 0.150f;
         long delayMs = (long) ((baseDelay + randomShift + extra * 0.2f) * 1000);
 
-        // === ТРОЙНАЯ ПРОВЕРКА ПЕРЕД УДАРОМ ===
         if (now - lastAttackTime >= delayMs && target.isAlive() && !target.isDead()) {
             double realDist = mc.player.distanceTo(target);
-            if (realDist <= ATTACK_RANGE && realDist > 0.1) { // >0.1 чтобы не бить, если цель внутри игрока
+            if (realDist <= ATTACK_RANGE && realDist > 0.1) {
                 if (mc.player.isSprinting()) mc.player.setSprinting(false);
                 mc.interactionManager.attackEntity(mc.player, target);
                 mc.player.swingHand(mc.player.getActiveHand());
                 lastAttackTime = now;
                 if (random.nextFloat() < 0.04f + extra * 0.1f) {
-                    lastAttackTime = now + 150; // пропуск удара
+                    lastAttackTime = now + 150;
                 }
             }
         }
-    }
-
-    private static void saveNeuralData() {
-        if (recordedData.isEmpty()) return;
-        try (PrintWriter writer = new PrintWriter(new OutputStreamWriter(
-                new FileOutputStream(DATA_FILE, true), StandardCharsets.UTF_8))) {
-            writer.println("===SESSION " + currentSessionId + "===");
-            writer.println("SAMPLES:" + sampleCount);
-            for (float[] sample : recordedData) {
-                for (float val : sample) {
-                    writer.print(val + ",");
-                }
-                writer.println();
-            }
-            writer.println("===END===");
-            LOGGER.info("Сохранено " + sampleCount + " сэмплов");
-        } catch (IOException e) {
-            LOGGER.error("Ошибка сохранения", e);
-        }
-    }
-
-    private static void loadNeuralData() {
-        neuralData.clear();
-        try (BufferedReader reader = new BufferedReader(new InputStreamReader(
-                new FileInputStream(DATA_FILE), StandardCharsets.UTF_8))) {
-            String line;
-            boolean inSession = false;
-            while ((line = reader.readLine()) != null) {
-                if (line.startsWith("===SESSION")) { inSession = true; continue; }
-                if (line.startsWith("===END===")) { inSession = false; continue; }
-                if (inSession && !line.startsWith("SAMPLES:")) {
-                    String[] parts = line.split(",");
-                    if (parts.length >= 10) {
-                        float[] sample = new float[10];
-                        for (int i = 0; i < 10; i++) sample[i] = Float.parseFloat(parts[i]);
-                        neuralData.add(sample);
-                    }
-                }
-            }
-            LOGGER.info("Загружено " + neuralData.size() + " сэмплов");
-        } catch (IOException ignored) {}
     }
 
     private static float lerpAngle(float from, float to, float speed) {
