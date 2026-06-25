@@ -2,7 +2,6 @@ package com.example.speed;
 
 import net.fabricmc.api.ModInitializer;
 import net.minecraft.client.MinecraftClient;
-import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.util.math.Box;
 import net.minecraft.util.math.MathHelper;
@@ -23,28 +22,29 @@ public class SpeedMod implements ModInitializer {
     // === НАСТРОЙКИ ===
     private static final double SEARCH_RANGE = 5.0;
     private static final double ATTACK_RANGE = 3.0;
-    private static final float SMOOTH_SPEED = 0.15f;
+    private static final float SMOOTH_SPEED = 0.15f; // базовая плавность (будет переопределяться стилем)
 
     // === РЕЖИМЫ ===
     private static enum Mode { OFF, LEARN, PLAY }
     private static Mode mode = Mode.OFF;
 
-    // === ЗАПИСЬ ===
+    // === ЗАПИСЬ (расширенный формат) ===
     private static final Queue<float[]> recordedData = new ConcurrentLinkedQueue<>();
     private static long recordStartTime = 0;
     private static String currentSessionId = "";
     private static int sampleCount = 0;
-    private static final int MAX_SAMPLES = 5000;
-    private static final String DATA_FILE = "killaura_neurons.txt";
+    private static final int MAX_SAMPLES = 10000; // больше сэмплов = точнее стиль
+    private static final String DATA_FILE = "killaura_style.txt";
 
     // === ВОСПРОИЗВЕДЕНИЕ ===
     private static List<float[]> neuralData = new ArrayList<>();
     private static int playIndex = 0;
     private static long lastPlayTime = 0;
+    private static float lastYaw = 0, lastPitch = 0; // для плавного перехода
 
     // === СОСТОЯНИЕ ===
     private static boolean isEnabled = false;
-    private static PlayerEntity lockedTarget = null;  // ← теперь только игроки
+    private static PlayerEntity lockedTarget = null;
     private static long lastAttackTime = 0;
     private static final Random random = new Random();
 
@@ -56,7 +56,7 @@ public class SpeedMod implements ModInitializer {
 
     @Override
     public void onInitialize() {
-        LOGGER.info("Neural KillAura (только игроки) загружена! R - вкл/выкл, L - запись, P - воспроизведение");
+        LOGGER.info("StyleCopy KillAura (полная имитация) загружена! R - вкл/выкл, L - запись, P - воспроизведение");
         loadNeuralData();
 
         new Thread(() -> {
@@ -85,7 +85,7 @@ public class SpeedMod implements ModInitializer {
                                     sampleCount = 0;
                                     recordStartTime = System.currentTimeMillis();
                                     currentSessionId = String.valueOf(System.currentTimeMillis());
-                                    LOGGER.info("=== НАЧАЛО ЗАПИСИ (только игроки) ===");
+                                    LOGGER.info("=== НАЧАЛО ЗАПИСИ СТИЛЯ ===");
                                 } else {
                                     saveNeuralData();
                                     LOGGER.info("=== ЗАПИСЬ ОСТАНОВЛЕНА, СОХРАНЕНО " + sampleCount + " СЭМПЛОВ ===");
@@ -99,7 +99,9 @@ public class SpeedMod implements ModInitializer {
                                     loadNeuralData();
                                     playIndex = 0;
                                     lastPlayTime = 0;
-                                    LOGGER.info("=== ВОСПРОИЗВЕДЕНИЕ ЗАПУЩЕНО (только игроки) ===");
+                                    lastYaw = mc.player.getYaw();
+                                    lastPitch = mc.player.getPitch();
+                                    LOGGER.info("=== ВОСПРОИЗВЕДЕНИЕ СТИЛЯ ЗАПУЩЕНО (" + neuralData.size() + " сэмплов) ===");
                                 } else {
                                     LOGGER.info("=== ВОСПРОИЗВЕДЕНИЕ ОСТАНОВЛЕНО ===");
                                 }
@@ -110,70 +112,50 @@ public class SpeedMod implements ModInitializer {
                         if (!isEnabled) return;
 
                         // === ПОИСК ЦЕЛИ (ТОЛЬКО ИГРОКИ) ===
-                        PlayerEntity target = getTargetPlayer();   // ← изменённая функция
+                        PlayerEntity target = getTargetPlayer();
                         if (target == null) { lockedTarget = null; return; }
 
                         double dist = mc.player.distanceTo(target);
                         if (dist > SEARCH_RANGE) { lockedTarget = null; return; }
 
-                        // === РЕЖИМ ЗАПИСИ ===
+                        // === РЕЖИМ ЗАПИСИ (расширенный) ===
                         if (mode == Mode.LEARN && target != null && sampleCount < MAX_SAMPLES) {
-                            float[] sample = captureSample(target);
+                            float[] sample = captureFullSample(target);
                             recordedData.offer(sample);
                             sampleCount++;
-                            if (sampleCount % 100 == 0) {
+                            if (sampleCount % 200 == 0) {
                                 LOGGER.info("Записано: " + sampleCount + " сэмплов");
                             }
                         }
 
-                        // === РЕЖИМ ВОСПРОИЗВЕДЕНИЯ ===
+                        // === РЕЖИМ ВОСПРОИЗВЕДЕНИЯ (с плавным смешиванием) ===
                         if (mode == Mode.PLAY) {
                             if (!neuralData.isEmpty()) {
-                                if (playIndex >= neuralData.size()) {
-                                    playIndex = 0;
-                                    if (neuralData.size() > 1) {
-                                        Collections.shuffle(neuralData, random);
-                                    }
-                                }
-                                float[] neuron = neuralData.get(playIndex % neuralData.size());
-                                applyNeuron(neuron, target);
+                                // Используем несколько сэмплов для интерполяции
+                                float[] neuron = getInterpolatedSample();
+                                applyStyledNeuron(neuron, target);
                                 playIndex++;
                                 return;
                             } else {
-                                LOGGER.warn("Нет нейроданных для воспроизведения");
+                                LOGGER.warn("Нет данных стиля");
                                 mode = Mode.OFF;
                                 return;
                             }
                         }
 
-                        // === РЕЖИМ АТАКИ (ОБЫЧНЫЙ) ===
+                        // === ОБЫЧНАЯ АТАКА (если не PLAY/LEARN) ===
                         applySmartAttack(target, dist);
 
                     } catch (Exception e) {
-                        LOGGER.error("Neural error", e);
+                        LOGGER.error("Style error", e);
                     }
                 });
             }
         }).start();
     }
 
-    // ==================== НОВАЯ ФУНКЦИЯ ПОИСКА ТОЛЬКО ИГРОКОВ ====================
-    private static PlayerEntity getTargetPlayer() {
-        if (mc.player == null || mc.world == null) return null;
-        Box box = mc.player.getBoundingBox().expand(SEARCH_RANGE);
-        List<PlayerEntity> players = mc.world.getEntitiesByClass(
-                PlayerEntity.class,
-                box,
-                e -> e != mc.player && e.isAlive() && !e.isDead()
-        );
-        // Фильтруем по дистанции поиска
-        players.removeIf(e -> mc.player.distanceTo(e) > SEARCH_RANGE);
-        players.sort(Comparator.comparingDouble(e -> mc.player.distanceTo(e)));
-        return players.isEmpty() ? null : players.get(0);
-    }
-
-    // === ЗАХВАТ СЭМПЛА ДЛЯ ОБУЧЕНИЯ ===
-    private static float[] captureSample(LivingEntity target) {
+    // ==================== РАСШИРЕННЫЙ ЗАХВАТ СЭМПЛА ====================
+    private static float[] captureFullSample(LivingEntity target) {
         Vec3d eyePos = mc.player.getEyePos();
         Vec3d targetPos = target.getPos().add(0, target.getHeight() * 0.5, 0);
         double dx = targetPos.x - eyePos.x;
@@ -184,38 +166,92 @@ public class SpeedMod implements ModInitializer {
         float yaw = (float) MathHelper.atan2(dz, dx) * (180F / (float) Math.PI) - 90F;
         float pitch = (float) -MathHelper.atan2(dy, dist) * (180F / (float) Math.PI);
 
+        // Текущие углы игрока
+        float curYaw = mc.player.getYaw();
+        float curPitch = mc.player.getPitch();
+
+        // Производные (скорость изменения углов)
+        float yawVel = curYaw - lastYaw;
+        float pitchVel = curPitch - lastPitch;
+        lastYaw = curYaw;
+        lastPitch = curPitch;
+
+        // Время с начала записи
+        float time = (float) (System.currentTimeMillis() - recordStartTime) / 1000f;
+
+        // Случайный шум (но связанный с временем)
+        float noise = (float) Math.sin(time * 2.5f) * 0.05f + (random.nextFloat() - 0.5f) * 0.03f;
+
         return new float[]{
-            yaw,
-            pitch,
-            (float) dist,
-            (float) (System.currentTimeMillis() - recordStartTime) / 1000f,
-            (float) mc.player.getYaw(),
-            (float) mc.player.getPitch(),
-            random.nextFloat() * 0.1f
+            yaw,                   // 0: целевой yaw
+            pitch,                 // 1: целевой pitch
+            (float) dist,          // 2: дистанция
+            time,                  // 3: время
+            curYaw,                // 4: текущий yaw
+            curPitch,              // 5: текущий pitch
+            yawVel,                // 6: скорость yaw
+            pitchVel,              // 7: скорость pitch
+            noise,                 // 8: шум
+            (float) (Math.random() * 0.1f) // 9: дополнительная вариация
         };
     }
 
-    // === ПРИМЕНЕНИЕ НЕЙРО-СЭМПЛА ===
-    private static void applyNeuron(float[] neuron, LivingEntity target) {
-        float yaw = neuron[0];
-        float pitch = neuron[1];
+    // ==================== ИНТЕРПОЛЯЦИЯ МЕЖДУ СЭМПЛАМИ ====================
+    private static float[] getInterpolatedSample() {
+        if (neuralData.isEmpty()) return null;
+        int idx = playIndex % neuralData.size();
+        int nextIdx = (idx + 1) % neuralData.size();
+        float[] curr = neuralData.get(idx);
+        float[] next = neuralData.get(nextIdx);
+        float t = 0.5f + 0.4f * (float) Math.sin(playIndex * 0.07f); // плавное переключение
+
+        float[] result = new float[10];
+        for (int i = 0; i < 10; i++) {
+            result[i] = curr[i] + (next[i] - curr[i]) * t * 0.5f;
+        }
+        // Добавляем микро-рыскания, основанные на времени
+        result[0] += (float) Math.sin(playIndex * 0.13f) * 0.02f;
+        result[1] += (float) Math.cos(playIndex * 0.17f) * 0.02f;
+        return result;
+    }
+
+    // ==================== ПРИМЕНЕНИЕ СТИЛИЗОВАННОГО НЕЙРОНА ====================
+    private static void applyStyledNeuron(float[] neuron, LivingEntity target) {
+        float targetYaw = neuron[0];
+        float targetPitch = neuron[1];
         float dist = neuron[2];
-        float timeOffset = neuron[3];
-        float oldYaw = neuron[4];
-        float oldPitch = neuron[5];
-        float noise = neuron[6];
+        float time = neuron[3];
+        float curYaw = neuron[4];
+        float curPitch = neuron[5];
+        float yawVel = neuron[6];
+        float pitchVel = neuron[7];
+        float noise = neuron[8];
+        float extra = neuron[9];
 
-        float variation = (random.nextFloat() - 0.5f) * 0.2f;
-        float finalYaw = yaw + variation;
-        float finalPitch = pitch + variation * 0.5f;
+        // Восстанавливаем скорость движения мыши (имитация твоего стиля)
+        float speedFactor = 0.1f + 0.3f * (float) Math.abs(Math.sin(time * 0.5f));
+        float dynamicSmooth = Math.min(1.0f, 0.05f + speedFactor);
 
+        // Плавный поворот с учётом твоей скорости
         float currentYaw = mc.player.getYaw();
         float currentPitch = mc.player.getPitch();
-        mc.player.setYaw(lerpAngle(currentYaw, finalYaw, SMOOTH_SPEED));
-        mc.player.setPitch(lerpAngle(currentPitch, finalPitch, SMOOTH_SPEED));
 
+        // Добавляем микро-рыскания (как у живого человека)
+        float microYaw = (float) Math.sin(playIndex * 0.23f) * 0.03f;
+        float microPitch = (float) Math.cos(playIndex * 0.19f + 1.2f) * 0.03f;
+
+        float finalYaw = targetYaw + noise * 0.5f + microYaw + (random.nextFloat() - 0.5f) * 0.01f;
+        float finalPitch = targetPitch + noise * 0.3f + microPitch + (random.nextFloat() - 0.5f) * 0.01f;
+
+        mc.player.setYaw(lerpAngle(currentYaw, finalYaw, dynamicSmooth));
+        mc.player.setPitch(lerpAngle(currentPitch, finalPitch, dynamicSmooth));
+
+        // === АТАКА С ВАРИАЦИЯМИ ===
         long now = System.currentTimeMillis();
-        long delayMs = (long) (0.500 + Math.abs(noise) * 0.500);
+        // Задержка зависит от времени записи + случайность
+        float baseDelay = 0.500f + (float) Math.abs(Math.sin(time * 1.3f)) * 0.300f;
+        float randomShift = (random.nextFloat() - 0.5f) * 0.150f;
+        long delayMs = (long) ((baseDelay + randomShift + extra * 0.2f) * 1000);
 
         if (now - lastAttackTime >= delayMs && target.isAlive()) {
             double realDist = mc.player.distanceTo(target);
@@ -224,15 +260,31 @@ public class SpeedMod implements ModInitializer {
                 mc.interactionManager.attackEntity(mc.player, target);
                 mc.player.swingHand(mc.player.getActiveHand());
                 lastAttackTime = now;
-                if (random.nextFloat() < 0.05f) {
-                    LOGGER.info("[Нейрон] Пропуск удара (имитация усталости)");
-                    lastAttackTime = now + 200;
+
+                // Иногда "ошибаемся" — пропускаем удар (как человек)
+                if (random.nextFloat() < 0.04f + extra * 0.1f) {
+                    LOGGER.debug("[Стиль] Пропуск удара");
+                    lastAttackTime = now + 150;
                 }
             }
         }
     }
 
-    // === СОХРАНЕНИЕ ДАННЫХ ===
+    // === ПОИСК ТОЛЬКО ИГРОКОВ ===
+    private static PlayerEntity getTargetPlayer() {
+        if (mc.player == null || mc.world == null) return null;
+        Box box = mc.player.getBoundingBox().expand(SEARCH_RANGE);
+        List<PlayerEntity> players = mc.world.getEntitiesByClass(
+                PlayerEntity.class,
+                box,
+                e -> e != mc.player && e.isAlive() && !e.isDead()
+        );
+        players.removeIf(e -> mc.player.distanceTo(e) > SEARCH_RANGE);
+        players.sort(Comparator.comparingDouble(e -> mc.player.distanceTo(e)));
+        return players.isEmpty() ? null : players.get(0);
+    }
+
+    // === СОХРАНЕНИЕ ===
     private static void saveNeuralData() {
         if (recordedData.isEmpty()) return;
         try (PrintWriter writer = new PrintWriter(new OutputStreamWriter(
@@ -246,13 +298,13 @@ public class SpeedMod implements ModInitializer {
                 writer.println();
             }
             writer.println("===END===");
-            LOGGER.info("Сохранено " + sampleCount + " сэмплов в " + DATA_FILE);
+            LOGGER.info("Сохранено " + sampleCount + " сэмплов стиля");
         } catch (IOException e) {
             LOGGER.error("Ошибка сохранения", e);
         }
     }
 
-    // === ЗАГРУЗКА ДАННЫХ ===
+    // === ЗАГРУЗКА ===
     private static void loadNeuralData() {
         neuralData.clear();
         try (BufferedReader reader = new BufferedReader(new InputStreamReader(
@@ -260,32 +312,24 @@ public class SpeedMod implements ModInitializer {
             String line;
             boolean inSession = false;
             while ((line = reader.readLine()) != null) {
-                if (line.startsWith("===SESSION")) {
-                    inSession = true;
-                    continue;
-                }
-                if (line.startsWith("===END===")) {
-                    inSession = false;
-                    continue;
-                }
+                if (line.startsWith("===SESSION")) { inSession = true; continue; }
+                if (line.startsWith("===END===")) { inSession = false; continue; }
                 if (inSession && !line.startsWith("SAMPLES:")) {
                     String[] parts = line.split(",");
-                    if (parts.length >= 7) {
-                        float[] sample = new float[7];
-                        for (int i = 0; i < 7; i++) {
-                            sample[i] = Float.parseFloat(parts[i]);
-                        }
+                    if (parts.length >= 10) {
+                        float[] sample = new float[10];
+                        for (int i = 0; i < 10; i++) sample[i] = Float.parseFloat(parts[i]);
                         neuralData.add(sample);
                     }
                 }
             }
-            LOGGER.info("Загружено " + neuralData.size() + " нейро-сэмплов (только игроки)");
+            LOGGER.info("Загружено " + neuralData.size() + " сэмплов стиля");
         } catch (IOException e) {
-            LOGGER.warn("Файл данных не найден, начните с записи (L)");
+            LOGGER.warn("Файл стиля не найден, начните запись (L)");
         }
     }
 
-    // === ОБЫЧНАЯ АТАКА (ТОЛЬКО ПО ИГРОКАМ) ===
+    // === ОБЫЧНАЯ АТАКА (без обучения) ===
     private static void applySmartAttack(LivingEntity target, double dist) {
         Vec3d eyePos = mc.player.getEyePos();
         Vec3d targetPos = target.getPos().add(0, target.getHeight() * 0.5, 0);
@@ -293,18 +337,14 @@ public class SpeedMod implements ModInitializer {
         double dy = targetPos.y - eyePos.y;
         double dz = targetPos.z - eyePos.z;
         double distance = Math.sqrt(dx * dx + dz * dz);
-
         float yaw = (float) MathHelper.atan2(dz, dx) * (180F / (float) Math.PI) - 90F;
         float pitch = (float) -MathHelper.atan2(dy, distance) * (180F / (float) Math.PI);
-
         float jitterYaw = (random.nextFloat() - 0.5f) * 0.15f * 2;
         float jitterPitch = (random.nextFloat() - 0.5f) * 0.15f * 2;
-
         float currentYaw = mc.player.getYaw();
         float currentPitch = mc.player.getPitch();
         mc.player.setYaw(lerpAngle(currentYaw, yaw + jitterYaw, SMOOTH_SPEED));
         mc.player.setPitch(lerpAngle(currentPitch, pitch + jitterPitch, SMOOTH_SPEED));
-
         long now = System.currentTimeMillis();
         double delay = 0.760 + (0.800 - 0.760) * random.nextDouble();
         if (now - lastAttackTime >= (long)(delay * 1000) && target.isAlive() && dist <= ATTACK_RANGE) {
