@@ -18,7 +18,7 @@ public class SpeedMod implements ModInitializer {
     private static final Random random = new Random();
 
     // === НАСТРОЙКИ ===
-    private static final double ATTACK_RANGE = 4.0;          // УВЕЛИЧИЛ до 4.0
+    private static final double ATTACK_RANGE = 4.0;
     private static final double MIN_DELAY = 0.690;
     private static final double MAX_DELAY = 0.760;
     private static final boolean RESET_SPRINT = true;
@@ -39,10 +39,7 @@ public class SpeedMod implements ModInitializer {
                 mc.execute(() -> {
                     try {
                         if (mc.getWindow() == null || mc.player == null || mc.world == null) return;
-                        if (mc.interactionManager == null) {
-                            LOGGER.warn("interactionManager is null");
-                            return;
-                        }
+                        if (mc.interactionManager == null) return;
 
                         long window = mc.getWindow().getHandle();
 
@@ -62,31 +59,15 @@ public class SpeedMod implements ModInitializer {
                         if (!enabled) return;
 
                         // === ПОЛУЧАЕМ СУЩНОСТЬ ПОД ПРИЦЕЛОМ ===
-                        // Используем getTickDelta() для точности
-                        HitResult hit = mc.player.raycast(ATTACK_RANGE, mc.getTickDelta(), false);
-                        if (hit.getType() != HitResult.Type.ENTITY) {
-                            // Отладка: если не видит сущность
-                            // LOGGER.debug("Не сущность: " + hit.getType());
-                            return;
-                        }
+                        HitResult hit = mc.player.raycast(ATTACK_RANGE, 1.0f, false);
+                        if (hit.getType() != HitResult.Type.ENTITY) return;
 
                         EntityHitResult entityHit = (EntityHitResult) hit;
-                        if (!(entityHit.getEntity() instanceof LivingEntity target)) {
-                            LOGGER.debug("Цель не LivingEntity");
-                            return;
-                        }
+                        if (!(entityHit.getEntity() instanceof LivingEntity target)) return;
 
                         // === ПРОВЕРКИ ===
-                        if (target.isDead() || !target.isAlive() || target == mc.player) {
-                            LOGGER.debug("Цель мертва или это игрок");
-                            return;
-                        }
-
-                        double dist = mc.player.distanceTo(target);
-                        if (dist > ATTACK_RANGE) {
-                            LOGGER.debug("Дистанция {} > {}", dist, ATTACK_RANGE);
-                            return;
-                        }
+                        if (target.isDead() || !target.isAlive() || target == mc.player) return;
+                        if (mc.player.distanceTo(target) > ATTACK_RANGE) return;
 
                         // === ЗАДЕРЖКА ===
                         long now = System.currentTimeMillis();
@@ -94,10 +75,7 @@ public class SpeedMod implements ModInitializer {
                         delay += (random.nextDouble() - 0.5) * 0.015;
                         delay = Math.max(0.660, Math.min(0.780, delay));
 
-                        if (now - lastAttackTime < (long)(delay * 1000)) {
-                            // LOGGER.debug("Задержка");
-                            return;
-                        }
+                        if (now - lastAttackTime < (long)(delay * 1000)) return;
 
                         // === СБРОС СПРИНТА ===
                         if (RESET_SPRINT && mc.player.isSprinting()) {
@@ -108,9 +86,6 @@ public class SpeedMod implements ModInitializer {
                         mc.interactionManager.attackEntity(mc.player, target);
                         mc.player.swingHand(mc.player.getActiveHand());
                         lastAttackTime = now;
-
-                        // Отладка: успешный удар
-                        LOGGER.info("Удар по " + target.getName().getString());
 
                     } catch (Exception e) {
                         LOGGER.error("Ошибка TriggerBot", e);
