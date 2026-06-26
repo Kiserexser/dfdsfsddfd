@@ -1,148 +1,109 @@
-package ru.cat.modules.combat;
+package com.example.speed; // измени на свой пакет
 
-import net.minecraft.entity.Entity;
-import net.minecraft.entity.LivingEntity;
-import net.minecraft.entity.decoration.ArmorStandEntity;
-import net.minecraft.entity.effect.StatusEffects;
-import net.minecraft.entity.mob.MobEntity;
-import net.minecraft.entity.mob.Monster;
-import net.minecraft.entity.passive.AnimalEntity;
-import net.minecraft.entity.passive.VillagerEntity;
+import net.fabricmc.api.ModInitializer;
+import net.minecraft.client.MinecraftClient;
 import net.minecraft.entity.player.PlayerEntity;
-import net.minecraft.item.Items;
-import net.minecraft.util.Hand;
+import net.minecraft.text.Text;
 import net.minecraft.util.hit.EntityHitResult;
-import ru.cat.events.Event;
-import ru.cat.events.impl.EventUpdate;
-import ru.cat.manager.Manager;
-import ru.cat.modules.Function;
-import ru.cat.modules.FunctionAnnotation;
-import ru.cat.modules.Type;
-import ru.cat.modules.setting.BooleanSetting;
-import ru.cat.modules.setting.MultiSetting;
+import net.minecraft.util.hit.HitResult;
+import org.lwjgl.glfw.GLFW;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
-import java.util.Arrays;
 import java.util.Random;
 
-@FunctionAnnotation(name = "TriggerBot", keywords = {"Триггер", "Триггербот"}, desc = "Автоудар по цели под прицелом (задержка 0.69-0.76с)", type = Type.Combat)
-public class TriggerBot extends Function {
+public class SpeedMod implements ModInitializer {
+    public static final Logger LOGGER = LoggerFactory.getLogger("speedmod");
+    private static final MinecraftClient mc = MinecraftClient.getInstance();
+    private static final Random random = new Random();
 
-    private final MultiSetting targets = new MultiSetting(
-            "Цели",
-            Arrays.asList("Игроки", "Мобы", "Монстры"),
-            new String[]{"Игроки", "Друзья", "Мобы", "Монстры", "Жители"}
-    );
-
-    private final BooleanSetting attackWhileEating = new BooleanSetting("Бить когда ешь", false);
-    private final BooleanSetting throughShield = new BooleanSetting("Бить сквозь щит", true);
-    private final BooleanSetting resetSprint = new BooleanSetting("Сброс спринта", true);
-
-    // === НАСТРОЙКИ ЗАДЕРЖКИ И ОШИБОК ===
+    // === НАСТРОЙКИ ===
+    private static final double ATTACK_RANGE = 3.0;
     private static final double MIN_DELAY = 0.690;
     private static final double MAX_DELAY = 0.760;
-    private static final double MISS_CHANCE = 0.09;   // 9% промах (машем рукой)
-    private static final double SKIP_CHANCE = 0.02;   // 2% пропуск атаки (вообще не бьём)
-    private static final double REACH = 3.0;
+    private static final double MISS_CHANCE = 0.09;   // 9% промах
+    private static final double SKIP_CHANCE = 0.02;   // 2% пропуск
+    private static final boolean RESET_SPRINT = true;
 
-    private final Random random = new Random();
-    private long lastAttackTime = 0;
-
-    public TriggerBot() {
-        addSettings(targets, attackWhileEating, throughShield, resetSprint);
-    }
+    private static boolean enabled = false;
+    private static long lastAttackTime = 0;
+    private static final int TOGGLE_KEY = GLFW.GLFW_KEY_R;
+    private static boolean lastKeyState = false;
 
     @Override
-    public void onEvent(Event event) {
-        if (!(event instanceof EventUpdate)) return;
-        if (mc == null || mc.player == null || mc.world == null || mc.interactionManager == null) return;
-        if (!isEnabled()) return;
+    public void onInitialize() {
+        LOGGER.info("TriggerBot (автономный) загружен. Нажми R для включения/выключения.");
 
-        // ---- 1. ПОИСК ЦЕЛИ ----
-        LivingEntity target = null;
-        Lock lock = Manager.FUNCTION_MANAGER.lock;
-        if (lock != null && lock.state && isValidLockedTarget(lock.lockedTarget)) {
-            target = lock.lockedTarget;
-        } else {
-            if (!(mc.crosshairTarget instanceof EntityHitResult ehr)) return;
-            Entity e = ehr.getEntity();
-            if (!(e instanceof LivingEntity living)) return;
-            if (!isValidTarget(living)) return;
-            target = living;
-        }
+        new Thread(() -> {
+            while (true) {
+                try { Thread.sleep(10); } catch (InterruptedException ignored) {}
 
-        if (target == null) return;
+                mc.execute(() -> {
+                    try {
+                        if (mc.getWindow() == null || mc.player == null || mc.world == null) return;
+                        long window = mc.getWindow().getHandle();
 
-        // ---- 2. ПРОВЕРКИ НА ЕДУ, ЩИТ, КУЛДАУН ----
-        if (!attackWhileEating.get() && mc.player.isUsingItem() && !mc.player.getActiveItem().isOf(Items.SHIELD)) {
-            return;
-        }
+                        // === ПЕРЕКЛЮЧЕНИЕ ПО R ===
+                        boolean currentKey = GLFW.glfwGetKey(window, TOGGLE_KEY) == GLFW.GLFW_PRESS;
+                        if (currentKey && !lastKeyState) {
+                            enabled = !enabled;
+                            if (mc.player != null) {
+                                mc.player.sendMessage(Text.literal(
+                                        enabled ? "§aTriggerBot ВКЛЮЧЁН" : "§cTriggerBot ВЫКЛЮЧЁН"
+                                ), true);
+                            }
+                            LOGGER.info("TriggerBot: " + (enabled ? "ON" : "OFF"));
+                        }
+                        lastKeyState = currentKey;
 
-        float cooldown = mc.player.getAttackCooldownProgress(mc.getRenderTickCounter().getTickDelta(true));
-        if (cooldown < 0.9F) return;
+                        if (!enabled) return;
 
-        if (throughShield.get() && mc.player.isUsingItem() && mc.player.getActiveItem().isOf(Items.SHIELD)) {
-            mc.interactionManager.stopUsingItem(mc.player);
-        }
+                        // === ПРОВЕРКА ПРИЦЕЛА ===
+                        HitResult hit = mc.player.raycast(ATTACK_RANGE, 1.0f, false);
+                        if (hit.getType() != HitResult.Type.ENTITY) return;
 
-        double distanceSq = mc.player.squaredDistanceTo(target);
-        if (distanceSq > REACH * REACH) return;
+                        EntityHitResult entityHit = (EntityHitResult) hit;
+                        if (!(entityHit.getEntity() instanceof PlayerEntity target)) return;
 
-        // ---- 3. РАСЧЁТ ЗАДЕРЖКИ ----
-        long now = System.currentTimeMillis();
-        double delay = MIN_DELAY + (MAX_DELAY - MIN_DELAY) * random.nextDouble();
-        // Естественный разброс ±0.015с
-        delay += (random.nextDouble() - 0.5) * 0.015;
-        delay = Math.max(0.660, Math.min(0.780, delay));
+                        if (target.isDead() || !target.isAlive() || target == mc.player) return;
+                        if (mc.player.distanceTo(target) > ATTACK_RANGE) return;
 
-        if (now - lastAttackTime < (long)(delay * 1000)) return;
+                        // === ЗАДЕРЖКА ===
+                        long now = System.currentTimeMillis();
+                        double delay = MIN_DELAY + (MAX_DELAY - MIN_DELAY) * random.nextDouble();
+                        delay += (random.nextDouble() - 0.5) * 0.015;
+                        delay = Math.max(0.660, Math.min(0.780, delay));
 
-        // ---- 4. ПРОПУСК АТАКИ (2%) ----
-        if (random.nextDouble() < SKIP_CHANCE) {
-            // Пропускаем атаку – вообще не бьём, но обновляем таймер, чтобы не спамить
-            lastAttackTime = now + 80; // небольшая пауза
-            return;
-        }
+                        if (now - lastAttackTime < (long)(delay * 1000)) return;
 
-        // ---- 5. ПРОМАХ (9%) ----
-        if (random.nextDouble() < MISS_CHANCE) {
-            // Промах – просто машем рукой (без урона)
-            mc.player.swingHand(Hand.MAIN_HAND);
-            lastAttackTime = now + 50;
-            return;
-        }
+                        // === 2% ПРОПУСК ===
+                        if (random.nextDouble() < SKIP_CHANCE) {
+                            lastAttackTime = now + 80;
+                            return;
+                        }
 
-        // ---- 6. СБРОС СПРИНТА ----
-        if (resetSprint.get() && mc.player.isSprinting()) {
-            mc.player.setSprinting(false);
-        }
+                        // === 9% ПРОМАХ ===
+                        if (random.nextDouble() < MISS_CHANCE) {
+                            mc.player.swingHand(mc.player.getActiveHand());
+                            lastAttackTime = now + 50;
+                            return;
+                        }
 
-        // ---- 7. АТАКА ----
-        mc.interactionManager.attackEntity(mc.player, target);
-        mc.player.swingHand(Hand.MAIN_HAND);
-        lastAttackTime = now;
-    }
+                        // === СБРОС СПРИНТА ===
+                        if (RESET_SPRINT && mc.player.isSprinting()) {
+                            mc.player.setSprinting(false);
+                        }
 
-    // ==================== МЕТОДЫ ПРОВЕРКИ ЦЕЛИ ====================
+                        // === АТАКА ===
+                        mc.interactionManager.attackEntity(mc.player, target);
+                        mc.player.swingHand(mc.player.getActiveHand());
+                        lastAttackTime = now;
 
-    private boolean isValidTarget(LivingEntity entity) {
-        if (entity == null || entity.isDead() || !entity.isAlive() || entity == mc.player) return false;
-        if (entity instanceof ArmorStandEntity) return false;
-        if (Manager.FUNCTION_MANAGER.antiBot.check(entity)) return false;
-
-        if (entity instanceof PlayerEntity) {
-            if (!targets.get("Игроки")) return false;
-            if (!targets.get("Друзья") && Manager.FRIEND_MANAGER.isFriend(entity.getName().getString())) return false;
-        } else if (entity instanceof VillagerEntity && !targets.get("Жители")) return false;
-        else if (entity instanceof MobEntity || entity instanceof AnimalEntity) {
-            if (!targets.get("Мобы")) return false;
-        } else if (entity instanceof Monster && !targets.get("Монстры")) return false;
-
-        return !entity.hasStatusEffect(StatusEffects.INVISIBILITY) || mc.player.canSee(entity);
-    }
-
-    private boolean isValidLockedTarget(LivingEntity entity) {
-        if (entity == null || entity.isDead() || !entity.isAlive() || entity == mc.player) return false;
-        if (entity instanceof ArmorStandEntity) return false;
-        return !Manager.FUNCTION_MANAGER.antiBot.check(entity);
+                    } catch (Exception e) {
+                        LOGGER.error("Ошибка TriggerBot", e);
+                    }
+                });
+            }
+        }).start();
     }
 }
