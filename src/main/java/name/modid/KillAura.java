@@ -15,7 +15,7 @@ public class KillAura implements ModInitializer {
 
     @Override
     public void onInitialize() {
-        LOGGER.info("KillAura (Teleport) loaded. Press V to teleport forward 50 blocks.");
+        LOGGER.info("KillAura (Teleport) loaded. Press V to teleport 5 blocks forward.");
 
         new Thread(() -> {
             while (true) {
@@ -41,10 +41,10 @@ public class KillAura implements ModInitializer {
         double z = Math.cos(Math.toRadians(yaw));
 
         Vec3d currentPos = mc.player.getPos();
-        Vec3d newPos = currentPos.add(x * 50, 0, z * 50);
+        Vec3d newPos = currentPos.add(x * 5, 0, z * 5);   // ← изменено с 50 на 5
 
         mc.player.setPos(newPos.x, newPos.y, newPos.z);
-        mc.player.sendMessage(Text.literal("§aTeleported 50 blocks forward!"), true);
+        mc.player.sendMessage(Text.literal("§aTeleported 5 blocks forward!"), true); // ← сообщение тоже обновлено
         LOGGER.info("Teleported to " + newPos);
     }
 }
