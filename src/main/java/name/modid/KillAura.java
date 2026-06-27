@@ -3,6 +3,7 @@ package name.modid;
 import net.fabricmc.api.ModInitializer;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.entity.Entity;
+import net.minecraft.entity.EntityType;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.mob.ZombieEntity;
 import net.minecraft.entity.player.PlayerEntity;
@@ -52,7 +53,7 @@ public class KillAura implements ModInitializer {
     private static final String FILE_PREFIX = "neuro_style_";
     private static final String FILE_EXT = ".txt";
 
-    private static ZombieEntity currentFake = null; // теперь зомби
+    private static ZombieEntity currentFake = null;
     private static long fakeSpawnTime = 0;
     private static boolean isRecording = false;
     private static int fakeCount = 0;
@@ -61,7 +62,7 @@ public class KillAura implements ModInitializer {
     private static List<float[]> neuralData = new ArrayList<>();
     private static int playIndex = 0;
     private static float lastYaw = 0, lastPitch = 0;
-    private static LivingEntity lockedTarget = null; // теперь живая сущность
+    private static LivingEntity lockedTarget = null;
     private static long lastPlayAttackTime = 0;
 
     private static final int KEY_LEARN = GLFW.GLFW_KEY_X;
@@ -155,7 +156,6 @@ public class KillAura implements ModInitializer {
             return;
         }
 
-        // Поиск валидной позиции
         World world = mc.world;
         double angle = random.nextDouble() * 2 * Math.PI;
         double radius = 1.5 + random.nextDouble() * 0.5;
@@ -165,21 +165,26 @@ public class KillAura implements ModInitializer {
             double y = mc.player.getY();
 
             BlockPos pos = new BlockPos((int)Math.floor(x), (int)Math.floor(y), (int)Math.floor(z));
-            // Проверяем, что под ногами твёрдый блок и место свободно
             BlockPos below = pos.down();
             if (world.getBlockState(below).isSolid() && world.isAir(pos) && world.isAir(pos.up())) {
-                // Спавним зомби
-                currentFake = new ZombieEntity(world, x, y, z);
-                currentFake.setCustomName(Text.literal("§cЗомби #" + (fakeCount + 1)));
-                currentFake.setCustomNameVisible(true);
-                currentFake.setAiDisabled(false); // можно без ИИ, чтобы стоял
-                world.spawnEntity(currentFake);
+                // Создаём зомби через EntityType
+                ZombieEntity zombie = EntityType.ZOMBIE.create(world);
+                if (zombie == null) {
+                    mc.player.sendMessage(Text.literal("§cНе удалось создать зомби."), true);
+                    return;
+                }
+                zombie.setPosition(x, y, z);
+                zombie.setCustomName(Text.literal("§cЗомби #" + (fakeCount + 1)));
+                zombie.setCustomNameVisible(true);
+                // Отключаем ИИ, чтобы стоял на месте
+                zombie.setAiDisabled(true);
+                world.spawnEntity(zombie);
+                currentFake = zombie;
                 fakeSpawnTime = System.currentTimeMillis();
                 isRecording = false;
                 mc.player.sendMessage(Text.literal("§aЗомби #" + (fakeCount + 1) + " появился. Наведись на него."), true);
                 return;
             }
-            // Меняем угол для следующей попытки
             angle += 0.3;
         }
         mc.player.sendMessage(Text.literal("§cНе удалось найти место для спавна зомби."), true);
