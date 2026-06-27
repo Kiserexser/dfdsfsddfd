@@ -7,8 +7,8 @@ import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.network.AbstractClientPlayerEntity;
 import net.minecraft.text.Text;
 import net.minecraft.util.math.MathHelper;
+import net.minecraft.util.math.RotationAxis;
 import org.lwjgl.glfw.GLFW;
-import org.lwjgl.opengl.GL11;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -22,7 +22,7 @@ public class ArrowMod implements ModInitializer {
 
     @Override
     public void onInitialize() {
-        LOGGER.info("ArrowMod загружен (без Fabric API). Нажми Z для открытия/закрытия.");
+        LOGGER.info("ArrowMod загружен (без GL11). Нажми Z для открытия/закрытия.");
 
         new Thread(() -> {
             while (true) {
@@ -52,6 +52,12 @@ public class ArrowMod implements ModInitializer {
             super(Text.literal(""));
         }
 
+        // Пустой фон – прозрачный экран
+        @Override
+        public void renderBackground(DrawContext context, int mouseX, int mouseY, float delta) {
+            // Не рисуем фон
+        }
+
         @Override
         public void render(DrawContext context, int mouseX, int mouseY, float delta) {
             if (mc.player == null || mc.world == null) return;
@@ -76,33 +82,20 @@ public class ArrowMod implements ModInitializer {
                 float arrowX = FIXED_RADIUS * MathHelper.cos((float) Math.toRadians(angle)) + screenWidth / 2f;
                 float arrowY = FIXED_RADIUS * MathHelper.sin((float) Math.toRadians(angle)) + screenHeight / 2f;
 
-                // Рисуем треугольник через GL11
-                GL11.glPushMatrix();
-                GL11.glTranslatef(arrowX, arrowY, 0);
-                GL11.glRotatef(angle, 0, 0, 1);
+                var matrices = context.getMatrices();
+                matrices.push();
+                matrices.translate(arrowX, arrowY, 0);
+                matrices.multiply(RotationAxis.POSITIVE_Z.rotationDegrees(angle));
 
-                // Цвет белый (можно поменять)
-                GL11.glColor4f(1, 1, 1, 1);
+                // Рисуем символ ▲ с поворотом
+                context.drawText(mc.textRenderer, "▲", -6, -9, 0xFFFFFFFF, false);
 
-                // Размеры: ширина 12, длина 18 (в 1.5 раза больше)
-                float halfWidth = 6f;
-                float length = 18f;
+                matrices.pop();
 
-                GL11.glBegin(GL11.GL_TRIANGLES);
-                // Остриё (впереди, по оси Y вверх)
-                GL11.glVertex2f(0, length / 2);
-                // Левая нижняя точка
-                GL11.glVertex2f(-halfWidth, -length / 2);
-                // Правая нижняя точка
-                GL11.glVertex2f(halfWidth, -length / 2);
-                GL11.glEnd();
-
-                GL11.glPopMatrix();
-
-                // Отображение дистанции (опционально)
+                // Показываем дистанцию
                 if (dist > 0) {
                     String distText = String.format("%.1f", dist);
-                    context.drawText(mc.textRenderer, distText, (int) arrowX - mc.textRenderer.getWidth(distText) / 2, (int) (arrowY + length / 2 + 6), 0xCCFFFFFF, false);
+                    context.drawText(mc.textRenderer, distText, (int) arrowX - mc.textRenderer.getWidth(distText) / 2, (int) (arrowY + 18), 0xCCFFFFFF, false);
                 }
             }
         }
@@ -114,12 +107,12 @@ public class ArrowMod implements ModInitializer {
                 this.close();
                 return true;
             }
-            return false;
+            return false; // пропускаем все остальные клавиши в игру
         }
 
         @Override
         public boolean mouseClicked(double mouseX, double mouseY, int button) {
-            return false;
+            return false; // пропускаем клики в игру
         }
 
         @Override
