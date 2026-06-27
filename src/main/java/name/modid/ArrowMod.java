@@ -52,10 +52,21 @@ public class ArrowMod implements ModInitializer {
             super(Text.literal(""));
         }
 
-        // Пустой фон – не затеняем игру
+        @Override
+        public void init() {
+            super.init();
+            mc.getWindow().setCursorVisible(false);
+        }
+
+        @Override
+        public void removed() {
+            super.removed();
+            mc.getWindow().setCursorVisible(true);
+        }
+
         @Override
         public void renderBackground(DrawContext context, int mouseX, int mouseY, float delta) {
-            // Ничего не рисуем
+            // Прозрачный фон – не затеняем игру
         }
 
         @Override
@@ -77,7 +88,9 @@ public class ArrowMod implements ModInitializer {
                 double sin = MathHelper.sin((float) (yaw * (Math.PI * 2 / 360)));
                 double rotY = -(dz * cos - dx * sin);
                 double rotX = -(dx * cos + dz * sin);
-                float angle = (float) (Math.atan2(rotY, rotX) * 180 / Math.PI);
+
+                // Угол от вертикальной оси (вверх)
+                float angle = (float) (Math.atan2(rotX, rotY) * 180 / Math.PI);
 
                 float arrowX = FIXED_RADIUS * MathHelper.cos((float) Math.toRadians(angle)) + screenWidth / 2f;
                 float arrowY = FIXED_RADIUS * MathHelper.sin((float) Math.toRadians(angle)) + screenHeight / 2f;
@@ -87,23 +100,21 @@ public class ArrowMod implements ModInitializer {
                 matrices.translate(arrowX, arrowY, 0);
                 matrices.multiply(RotationAxis.POSITIVE_Z.rotationDegrees(angle));
 
-                // Рисуем символ ▲ с центром в (0,0) – остриё вверх
-                // Смещение подобрано так, чтобы центр символа был в (0,0)
+                // Символ ▲ – остриё указывает вверх (теперь повернётся правильно)
                 context.drawText(mc.textRenderer, "▲", -5, -10, 0xFFFFFFFF, false);
 
                 matrices.pop();
 
-                // Показываем дистанцию под стрелкой
+                // Дистанция под стрелкой
                 if (dist > 0) {
                     String distText = String.format("%.1f", dist);
-                    float textX = arrowX - mc.textRenderer.getWidth(distText) / 2f;
-                    float textY = arrowY + 12f;
-                    context.drawText(mc.textRenderer, distText, (int) textX, (int) textY, 0xCCFFFFFF, false);
+                    int textX = (int)(arrowX - mc.textRenderer.getWidth(distText) / 2f);
+                    int textY = (int)(arrowY + 12f);
+                    context.drawText(mc.textRenderer, distText, textX, textY, 0xCCFFFFFF, false);
                 }
             }
         }
 
-        // Пропускаем все клавиши в игру (кроме Z и ESC – для закрытия)
         @Override
         public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
             if (keyCode == GLFW.GLFW_KEY_Z || keyCode == GLFW.GLFW_KEY_ESCAPE) {
@@ -111,13 +122,12 @@ public class ArrowMod implements ModInitializer {
                 this.close();
                 return true;
             }
-            return false; // все остальные клавиши уходят в игру
+            return false; // все остальные клавиши идут в игру
         }
 
-        // Пропускаем клики мыши в игру
         @Override
         public boolean mouseClicked(double mouseX, double mouseY, int button) {
-            return false;
+            return false; // клики идут в игру
         }
 
         @Override
