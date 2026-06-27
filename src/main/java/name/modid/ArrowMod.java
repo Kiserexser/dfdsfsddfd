@@ -1,10 +1,15 @@
 package name.modid;
 
+import com.mojang.blaze3d.systems.RenderSystem;
 import net.fabricmc.api.ModInitializer;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.network.AbstractClientPlayerEntity;
+import net.minecraft.client.render.BufferBuilder;
+import net.minecraft.client.render.Tessellator;
+import net.minecraft.client.render.VertexFormat;
+import net.minecraft.client.render.VertexFormats;
 import net.minecraft.text.Text;
 import net.minecraft.util.Identifier;
 import net.minecraft.util.math.MathHelper;
@@ -26,7 +31,6 @@ public class ArrowMod implements ModInitializer {
     public void onInitialize() {
         LOGGER.info("ArrowMod загружен (без Fabric API). Нажми Z для включения.");
 
-        // Поток для опроса клавиш
         new Thread(() -> {
             while (true) {
                 try { Thread.sleep(10); } catch (InterruptedException ignored) {}
@@ -49,7 +53,6 @@ public class ArrowMod implements ModInitializer {
             }
         }).start();
 
-        // Устанавливаем экран с индикатором
         mc.setScreen(new IndicatorScreen());
     }
 
@@ -89,14 +92,31 @@ public class ArrowMod implements ModInitializer {
 
                 int size = 24;
 
-                context.getMatrices().push();
-                context.getMatrices().translate(arrowX, arrowY, 0);
-                context.getMatrices().multiply(RotationAxis.POSITIVE_Z.rotationDegrees(angle));
+                // === РЕНДЕРИНГ ЧЕРЕЗ РЕNDER SYSTEM (БЕЗ DRAWCONTEXT) ===
+                var matrices = context.getMatrices();
+                matrices.push();
+                matrices.translate(arrowX, arrowY, 0);
+                matrices.multiply(RotationAxis.POSITIVE_Z.rotationDegrees(angle));
 
-                // Правильный вызов drawTexture для официальных маппингов
-                context.drawTexture(ARROW_TEXTURE, -size/2, -size/2, 0, 0, size, size, size, size);
+                RenderSystem.setShaderTexture(0, ARROW_TEXTURE);
+                RenderSystem.setShaderColor(1, 1, 1, 1);
 
-                context.getMatrices().pop();
+                BufferBuilder buffer = Tessellator.getInstance().getBuffer();
+                buffer.begin(VertexFormat.DrawMode.QUADS, VertexFormats.POSITION_TEXTURE);
+
+                float half = size / 2f;
+                // Левая нижняя
+                buffer.vertex(matrices.peek().getPositionMatrix(), -half, -half, 0).texture(0, 0).next();
+                // Левая верхняя
+                buffer.vertex(matrices.peek().getPositionMatrix(), -half, half, 0).texture(0, 1).next();
+                // Правая верхняя
+                buffer.vertex(matrices.peek().getPositionMatrix(), half, half, 0).texture(1, 1).next();
+                // Правая нижняя
+                buffer.vertex(matrices.peek().getPositionMatrix(), half, -half, 0).texture(1, 0).next();
+
+                Tessellator.getInstance().draw();
+
+                matrices.pop();
             }
         }
 
