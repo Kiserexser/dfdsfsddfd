@@ -1,14 +1,10 @@
 package name.modid;
 
 import net.fabricmc.api.ModInitializer;
-import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
-import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.network.AbstractClientPlayerEntity;
-import net.minecraft.client.option.KeyBinding;
-import net.minecraft.client.util.InputUtil;
 import net.minecraft.text.Text;
 import net.minecraft.util.Identifier;
 import net.minecraft.util.math.MathHelper;
@@ -22,36 +18,46 @@ public class ArrowMod implements ModInitializer {
     private static final MinecraftClient mc = MinecraftClient.getInstance();
 
     private static boolean enabled = false;
+    private static boolean lastKeyState = false;
     private static final Identifier ARROW_TEXTURE = Identifier.of("arrowmod", "textures/arrow.png");
-    private static KeyBinding keyBinding;
 
     @Override
     public void onInitialize() {
-        LOGGER.info("ArrowMod загружен. Нажми Z для включения/выключения.");
+        LOGGER.info("ArrowMod загружен. Нажми Z для открытия/закрытия экрана со стрелками.");
 
-        // Регистрация клавиши через Fabric API (безопасно, т.к. KeyBindingHelper работает в onInitialize)
-        keyBinding = KeyBindingHelper.registerKeyBinding(new KeyBinding(
-                "key.arrowmod.toggle",
-                InputUtil.Type.KEYSYM,
-                GLFW.GLFW_KEY_Z,
-                "category.arrowmod"
-        ));
+        new Thread(() -> {
+            while (true) {
+                try { Thread.sleep(10); } catch (InterruptedException ignored) {}
 
-        // Обработка нажатия клавиши в клиентском тике
-        ClientTickEvents.END_CLIENT_TICK.register(client -> {
-            if (keyBinding.wasPressed()) {
-                enabled = !enabled;
-                if (client.player != null) {
-                    client.player.sendMessage(Text.literal(
-                            enabled ? "§aСтрелки ВКЛ" : "§cСтрелки ВЫКЛ"
-                    ), true);
-                }
+                mc.execute(() -> {
+                    if (mc.getWindow() == null || mc.player == null) return;
+                    long window = mc.getWindow().getHandle();
+
+                    boolean currentState = GLFW.glfwGetKey(window, GLFW.GLFW_KEY_Z) == GLFW.GLFW_PRESS;
+                    if (currentState && !lastKeyState) {
+                        enabled = !enabled;
+                        if (enabled) {
+                            mc.setScreen(new IndicatorScreen());
+                        } else {
+                            if (mc.currentScreen instanceof IndicatorScreen) {
+                                mc.setScreen(null);
+                            }
+                        }
+                    }
+                    lastKeyState = currentState;
+                });
             }
-        });
+        }).start();
+    }
 
-        // Отрисовка через HUD Render Callback (тоже из Fabric API)
-        net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback.EVENT.register((context, tickDelta) -> {
-            if (!enabled) return;
+    public static class IndicatorScreen extends Screen {
+        protected IndicatorScreen() {
+            super(Text.literal("ArrowIndicator"));
+        }
+
+        @Override
+        public void render(DrawContext context, int mouseX, int mouseY, float delta) {
+            super.render(context, mouseX, mouseY, delta);
             if (mc.player == null || mc.world == null) return;
 
             int screenWidth = mc.getWindow().getScaledWidth();
@@ -77,19 +83,38 @@ public class ArrowMod implements ModInitializer {
                 float arrowX = (float) (baseDistance * MathHelper.cos((float) Math.toRadians(angle)) + screenWidth / 2f);
                 float arrowY = (float) (baseDistance * MathHelper.sin((float) Math.toRadians(angle)) + screenHeight / 2f);
 
+                // Рисуем текстуру (если есть) или символ
                 int size = 24;
-                int half = size / 2;
-
                 var matrices = context.getMatrices();
                 matrices.push();
                 matrices.translate(arrowX, arrowY, 0);
                 matrices.multiply(RotationAxis.POSITIVE_Z.rotationDegrees(angle));
 
-                // Рисуем текстуру через DrawContext (безопасно)
-                context.drawTexture(ARROW_TEXTURE, -half, -half, size, size, 0, 0, size, size, size, size);
+                // Проверяем, есть ли текстура (если файл отсутствует – рисуем символ)
+                try {
+                    context.drawTexture(ARROW_TEXTURE, -size/2, -size/2, 0, 0, size, size, size, size);
+                } catch (Exception e) {
+                    // Если текстура не загружена – рисуем символ
+                    context.drawText(mc.textRenderer, "▲", -size/2, -size/2, 0xFFFFFFFF, false);
+                }
 
                 matrices.pop();
             }
-        });
+        }
+
+        @Override
+        public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+            if (keyCode == GLFW.GLFW_KEY_Z || keyCode == GLFW.GLFW_KEY_ESCAPE) {
+                this.close();
+                enabled = false;
+                return true;
+            }
+            return super.keyPressed(keyCode, scanCode, modifiers);
+        }
+
+        @Override
+        public boolean shouldPause() {
+            return false;
+        }
     }
 }
