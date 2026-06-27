@@ -1,146 +1,113 @@
-package im.expensive.functions.impl.render;
+package name.modid;
 
-import com.google.common.eventbus.Subscribe;
-import com.mojang.blaze3d.platform.GlStateManager;
-import im.expensive.command.friends.FriendStorage;
-import im.expensive.events.EventDisplay;
-import im.expensive.functions.api.Category;
-import im.expensive.functions.api.Function;
-import im.expensive.functions.api.FunctionRegister;
-import im.expensive.functions.settings.Setting;
-import im.expensive.functions.settings.impl.ColorSetting;
-import im.expensive.functions.settings.impl.ModeSetting;
-import im.expensive.utils.math.MathUtil;
-import im.expensive.utils.player.MoveUtils;
-import im.expensive.utils.player.PlayerUtils;
-import im.expensive.utils.render.ColorUtils;
-import im.expensive.utils.render.DisplayUtils;
-import net.minecraft.client.Minecraft;
-import net.minecraft.client.entity.player.AbstractClientPlayerEntity;
-import net.minecraft.client.gui.screen.inventory.InventoryScreen;
-import net.minecraft.client.settings.PointOfView;
-import net.minecraft.entity.LivingEntity;
-import net.minecraft.util.ResourceLocation;
+import net.fabricmc.api.ModInitializer;
+import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.gui.DrawContext;
+import net.minecraft.client.gui.screen.Screen;
+import net.minecraft.client.network.AbstractClientPlayerEntity;
+import net.minecraft.text.Text;
+import net.minecraft.util.Identifier;
 import net.minecraft.util.math.MathHelper;
-import org.lwjgl.opengl.GL11;
+import org.lwjgl.glfw.GLFW;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
-import java.awt.*;
+public class ArrowMod implements ModInitializer {
+    public static final Logger LOGGER = LoggerFactory.getLogger("arrowmod");
+    private static final MinecraftClient mc = MinecraftClient.getInstance();
 
-@FunctionRegister(name = "Pointers", type = Category.Render)
-public class Pointers extends Function {
-    private final ModeSetting colores = new ModeSetting("Тип", "Клиент", new String[]{"Клиент", "Свой"});
-    private final ColorSetting color1 = (new ColorSetting("Цвет", ColorUtils.rgb(255, 255, 255))).setVisible(this::lambda$new$0);
-    private final ColorSetting colorfr1 = (new ColorSetting("Цвет друзей", ColorUtils.rgb(73, 252, 3))).setVisible(this::lambda$new$1);
-    public float animationStep;
-    private float lastYaw;
-    private float lastPitch;
-    private float animatedYaw;
-    private float animatedPitch;
-    LivingEntity entity;
+    private static boolean enabled = false;
+    private static boolean lastKeyState = false;
+    private static final Identifier ARROW_TEXTURE = Identifier.of("arrowmod", "textures/arrow.png");
 
-    public Pointers() {
-        this.addSettings(new Setting[]{this.colores, this.color1, this.colorfr1});
+    @Override
+    public void onInitialize() {
+        LOGGER.info("ArrowMod загружен. Нажми Z для включения/выключения.");
+
+        new Thread(() -> {
+            while (true) {
+                try { Thread.sleep(10); } catch (InterruptedException ignored) {}
+
+                mc.execute(() -> {
+                    if (mc.getWindow() == null || mc.player == null) return;
+                    long window = mc.getWindow().getHandle();
+
+                    boolean currentState = GLFW.glfwGetKey(window, GLFW.GLFW_KEY_Z) == GLFW.GLFW_PRESS;
+                    if (currentState && !lastKeyState) {
+                        enabled = !enabled;
+                        if (mc.player != null) {
+                            mc.player.sendMessage(Text.literal(
+                                    enabled ? "§aСтрелки ВКЛ" : "§cСтрелки ВЫКЛ"
+                            ), true);
+                        }
+                    }
+                    lastKeyState = currentState;
+                });
+            }
+        }).start();
+
+        mc.setScreen(new IndicatorScreen());
     }
 
-    @Subscribe
-    public void onDisplay(EventDisplay var1) {
-        if (mc.player == null || mc.world == null || var1.getType() != EventDisplay.Type.PRE) return;
-
-        this.animatedYaw = MathUtil.fast(this.animatedYaw, mc.player.moveStrafing * 10.0F, 5.0F);
-        this.animatedPitch = MathUtil.fast(this.animatedPitch, mc.player.moveForward * 10.0F, 5.0F);
-
-        float distance = 30.0F;
-        if (mc.currentScreen instanceof InventoryScreen) distance += 30.0F;
-        if (MoveUtils.isMoving()) distance += 0.0F; // можно убрать
-
-        this.animationStep = MathUtil.fast(this.animationStep, distance, 6.0F);
-
-        if (mc.gameSettings.getPointOfView() != PointOfView.FIRST_PERSON) return;
-
-        for (AbstractClientPlayerEntity player : mc.world.getPlayers()) {
-            if (!PlayerUtils.isNameValid(player.getNameClear())) continue;
-            if (player == mc.player) continue;
-
-            double x = player.lastTickPosX + (player.getPosX() - player.lastTickPosX) * mc.getRenderPartialTicks()
-                    - mc.getRenderManager().info.getProjectedView().getX();
-            double z = player.lastTickPosZ + (player.getPosZ() - player.lastTickPosZ) * mc.getRenderPartialTicks()
-                    - mc.getRenderManager().info.getProjectedView().getZ();
-
-            double cos = MathHelper.cos((float) (mc.getRenderManager().info.getYaw() * (Math.PI * 2 / 360)));
-            double sin = MathHelper.sin((float) (mc.getRenderManager().info.getYaw() * (Math.PI * 2 / 360)));
-            double rotY = -(z * cos - x * sin);
-            double rotX = -(x * cos + z * sin);
-
-            float angle = (float) (Math.atan2(rotY, rotX) * 180 / Math.PI);
-
-            float screenWidth = mc.getWindow().getScaledWidth();
-            float screenHeight = mc.getWindow().getScaledHeight();
-
-            double arrowX = (this.animationStep * MathHelper.cos((float) Math.toRadians(angle)) + screenWidth / 2.0F)
-                    + this.animatedYaw;
-            double arrowY = (this.animationStep * MathHelper.sin((float) Math.toRadians(angle)) + screenHeight / 2.0F)
-                    + this.animatedPitch;
-
-            GlStateManager.pushMatrix();
-            GlStateManager.disableBlend();
-            GlStateManager.translated(arrowX, arrowY, 0);
-            GlStateManager.rotatef(angle, 0, 0, 1);
-
-            boolean isFriend = FriendStorage.isFriend(player.getGameProfile().getName());
-
-            if (colores.is("Свой")) {
-                int color = isFriend ? (int) colorfr1.get() : (int) color1.get();
-                // Рисуем чёрный треугольник для тени
-                drawTriangle(-4.0F, -1.0F, 4.0F, 7.0F, new Color(0, 0, 0, 32));
-                // Рисуем основной треугольник
-                drawTriangle(-3.0F, 0.0F, 3.0F, 5.0F, new Color(color));
-                // Рисуем PNG (если есть)
-                DisplayUtils.drawImage(new ResourceLocation("expensive/images/arrow.png"), -8.0F, -9.0F, 18.0F, 18.0F, color);
-            } else {
-                // "Клиент" – используем цвет из FriendStorage или дефолтный белый
-                int color = isFriend ? FriendStorage.getColor() : ColorUtils.rgb(255, 255, 255);
-                drawTriangle(-4.0F, -1.0F, 4.0F, 7.0F, new Color(0, 0, 0, 32));
-                drawTriangle(-3.0F, 0.0F, 3.0F, 5.0F, new Color(color));
-                DisplayUtils.drawImage(new ResourceLocation("expensive/images/arrow.png"), -8.0F, -9.0F, 18.0F, 18.0F, color);
-            }
-
-            GlStateManager.enableBlend();
-            GlStateManager.popMatrix();
+    public static class IndicatorScreen extends Screen {
+        protected IndicatorScreen() {
+            super(Text.literal("ArrowIndicator"));
         }
 
-        this.lastYaw = mc.player.rotationYaw;
-        this.lastPitch = mc.player.rotationPitch;
-    }
+        @Override
+        public void render(DrawContext context, int mouseX, int mouseY, float delta) {
+            super.render(context, mouseX, mouseY, delta);
+            if (!enabled) return;
+            if (mc.player == null || mc.world == null) return;
 
-    // === РЕАЛИЗАЦИЯ РИСОВАНИЯ ТРЕУГОЛЬНИКА ===
-    public static void drawTriangle(float x, float y, float width, float height, Color color) {
-        GL11.glPushMatrix();
-        GL11.glDisable(GL11.GL_TEXTURE_2D);
-        GL11.glEnable(GL11.GL_BLEND);
-        GL11.glBlendFunc(GL11.GL_SRC_ALPHA, GL11.GL_ONE_MINUS_SRC_ALPHA);
+            int screenWidth = mc.getWindow().getScaledWidth();
+            int screenHeight = mc.getWindow().getScaledHeight();
 
-        float r = color.getRed() / 255f;
-        float g = color.getGreen() / 255f;
-        float b = color.getBlue() / 255f;
-        float a = color.getAlpha() / 255f;
+            for (AbstractClientPlayerEntity player : mc.world.getPlayers()) {
+                if (player == mc.player || player.isDead() || !player.isAlive()) continue;
 
-        GL11.glColor4f(r, g, b, a);
-        GL11.glBegin(GL11.GL_TRIANGLES);
-        GL11.glVertex2f(x, y + height);
-        GL11.glVertex2f(x + width / 2, y);
-        GL11.glVertex2f(x + width, y + height);
-        GL11.glEnd();
+                double dx = player.getX() - mc.player.getX();
+                double dz = player.getZ() - mc.player.getZ();
+                double dist = Math.sqrt(dx * dx + dz * dz);
+                if (dist > 50) continue;
 
-        GL11.glEnable(GL11.GL_TEXTURE_2D);
-        GL11.glDisable(GL11.GL_BLEND);
-        GL11.glPopMatrix();
-    }
+                float yaw = mc.player.getYaw();
+                double cos = MathHelper.cos((float) (yaw * (Math.PI * 2 / 360)));
+                double sin = MathHelper.sin((float) (yaw * (Math.PI * 2 / 360)));
+                double rotY = -(dz * cos - dx * sin);
+                double rotX = -(dx * cos + dz * sin);
 
-    private Boolean lambda$new$1() {
-        return this.colores.is("Свой");
-    }
+                float angle = (float) (Math.atan2(rotY, rotX) * 180 / Math.PI);
 
-    private Boolean lambda$new$0() {
-        return this.colores.is("Свой");
+                float baseDistance = 60 + 100 * (float) Math.min(1, dist / 50);
+                float arrowX = (float) (baseDistance * MathHelper.cos((float) Math.toRadians(angle)) + screenWidth / 2f);
+                float arrowY = (float) (baseDistance * MathHelper.sin((float) Math.toRadians(angle)) + screenHeight / 2f);
+
+                // Используем символ, если PNG не загружен или не нужен
+                // Чтобы использовать PNG, раскомментируй блок ниже и закомментируй drawText
+                // context.drawTexture(ARROW_TEXTURE, (int)arrowX - 12, (int)arrowY - 12, 0, 0, 24, 24, 24, 24);
+
+                context.drawText(mc.textRenderer, "▲", (int) arrowX, (int) arrowY, 0xFFFFFFFF, true);
+            }
+        }
+
+        @Override
+        public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+            if (keyCode == GLFW.GLFW_KEY_Z) {
+                enabled = !enabled;
+                if (mc.player != null) {
+                    mc.player.sendMessage(Text.literal(
+                            enabled ? "§aСтрелки ВКЛ" : "§cСтрелки ВЫКЛ"
+                    ), true);
+                }
+                return true;
+            }
+            return super.keyPressed(keyCode, scanCode, modifiers);
+        }
+
+        @Override
+        public boolean shouldPause() {
+            return false;
+        }
     }
 }
