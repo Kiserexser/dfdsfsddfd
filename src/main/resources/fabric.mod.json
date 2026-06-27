@@ -8,7 +8,7 @@
   "license": "MIT",
   "environment": "client",
   "entrypoints": {
-    "main": ["name.modid.KillAura"]
+    "main": ["name.modid.GrimFlyMod"]
   },
   "depends": {
     "fabricloader": ">=0.15.11",
