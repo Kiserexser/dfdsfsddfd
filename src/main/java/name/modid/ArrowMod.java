@@ -5,11 +5,14 @@ import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.network.AbstractClientPlayerEntity;
+import net.minecraft.client.render.BufferBuilder;
+import net.minecraft.client.render.Tessellator;
+import net.minecraft.client.render.VertexFormat;
+import net.minecraft.client.render.VertexFormats;
 import net.minecraft.text.Text;
-import net.minecraft.util.Identifier;
 import net.minecraft.util.math.MathHelper;
-import net.minecraft.util.math.RotationAxis;
 import org.lwjgl.glfw.GLFW;
+import org.lwjgl.opengl.GL11;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -18,13 +21,11 @@ public class ArrowMod implements ModInitializer {
     private static final MinecraftClient mc = MinecraftClient.getInstance();
 
     private static boolean enabled = false;
-    private static final Identifier ARROW_TEXTURE = Identifier.of("arrowmod", "textures/arrow.png");
-
     private static boolean lastKeyState = false;
 
     @Override
     public void onInitialize() {
-        LOGGER.info("ArrowMod загружен (без Fabric API). Нажми Z для включения.");
+        LOGGER.info("ArrowMod загружен. Нажми Z.");
 
         new Thread(() -> {
             while (true) {
@@ -85,23 +86,23 @@ public class ArrowMod implements ModInitializer {
                 float arrowX = (float) (baseDistance * MathHelper.cos((float) Math.toRadians(angle)) + screenWidth / 2f);
                 float arrowY = (float) (baseDistance * MathHelper.sin((float) Math.toRadians(angle)) + screenHeight / 2f);
 
-                int size = 24;
+                // Рисуем треугольник через GL11
+                GL11.glPushMatrix();
+                GL11.glTranslatef(arrowX, arrowY, 0);
+                GL11.glRotatef(angle, 0, 0, 1);
+                GL11.glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
 
-                context.getMatrices().push();
-                context.getMatrices().translate(arrowX, arrowY, 0);
-                context.getMatrices().multiply(RotationAxis.POSITIVE_Z.rotationDegrees(angle));
+                Tessellator tessellator = Tessellator.getInstance();
+                BufferBuilder buffer = tessellator.begin(VertexFormat.DrawMode.TRIANGLES, VertexFormats.POSITION);
 
-                // Правильный вызов drawTexture для официальных маппингов (10 параметров)
-                context.drawTexture(
-                        ARROW_TEXTURE,          // текстура
-                        -size/2, -size/2,       // x, y
-                        size, size,             // ширина, высота (размер на экране)
-                        0, 0,                   // u, v (координаты в текстуре)
-                        size, size,             // regionWidth, regionHeight (размер области в текстуре)
-                        size, size              // textureWidth, textureHeight (размер всей текстуры)
-                );
+                buffer.vertex(0, -6, 0).endVertex();   // остриё
+                buffer.vertex(-5, 4, 0).endVertex();   // лево-низ
+                buffer.vertex(5, 4, 0).endVertex();    // право-низ
 
-                context.getMatrices().pop();
+                BufferBuilder.BuiltBuffer builtBuffer = buffer.end();
+                tessellator.draw(builtBuffer);
+
+                GL11.glPopMatrix();
             }
         }
 
