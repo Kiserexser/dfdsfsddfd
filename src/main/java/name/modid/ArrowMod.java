@@ -8,6 +8,7 @@ import net.minecraft.client.network.AbstractClientPlayerEntity;
 import net.minecraft.text.Text;
 import net.minecraft.util.Identifier;
 import net.minecraft.util.math.MathHelper;
+import net.minecraft.util.math.RotationAxis;
 import org.lwjgl.glfw.GLFW;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -19,7 +20,6 @@ public class ArrowMod implements ModInitializer {
     private static boolean enabled = false;
     private static final Identifier ARROW_TEXTURE = Identifier.of("arrowmod", "textures/arrow.png");
 
-    // ===== КЛАВИША Z (без KeyBindingHelper) =====
     private static boolean lastKeyState = false;
 
     @Override
@@ -49,11 +49,10 @@ public class ArrowMod implements ModInitializer {
             }
         }).start();
 
-        // Хук для отрисовки через свой Screen
+        // Устанавливаем экран с индикатором
         mc.setScreen(new IndicatorScreen());
     }
 
-    // ===== ЭКРАН С ОТРИСОВКОЙ =====
     public static class IndicatorScreen extends Screen {
         protected IndicatorScreen() {
             super(Text.literal("ArrowIndicator"));
@@ -88,16 +87,14 @@ public class ArrowMod implements ModInitializer {
                 float arrowX = (float) (baseDistance * MathHelper.cos((float) Math.toRadians(angle)) + screenWidth / 2f);
                 float arrowY = (float) (baseDistance * MathHelper.sin((float) Math.toRadians(angle)) + screenHeight / 2f);
 
+                int size = 24;
+
                 context.getMatrices().push();
                 context.getMatrices().translate(arrowX, arrowY, 0);
-                context.getMatrices().rotate((float) Math.toRadians(angle), 0, 0, 1);
+                context.getMatrices().multiply(RotationAxis.POSITIVE_Z.rotationDegrees(angle));
 
-                int size = 24;
-                context.drawTexture(ARROW_TEXTURE,
-                        -size/2, -size/2,
-                        0, 0,
-                        size, size,
-                        size, size);
+                // Правильный вызов drawTexture для официальных маппингов
+                context.drawTexture(ARROW_TEXTURE, -size/2, -size/2, 0, 0, size, size, size, size);
 
                 context.getMatrices().pop();
             }
