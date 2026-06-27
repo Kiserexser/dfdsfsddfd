@@ -34,7 +34,6 @@ public class KillAura implements ModInitializer {
 
     // === НАСТРОЙКИ ===
     private static final int TOTAL_FAKES = 20;
-    private static final double FAKE_RADIUS = 2.0;
     private static final double LEARN_DURATION_SEC = 2.0;
     private static final double ATTACK_RANGE = 3.5;
     private static final double MIN_DELAY = 0.650;
@@ -145,7 +144,7 @@ public class KillAura implements ModInitializer {
         }).start();
     }
 
-    // ==================== СПАВН ЗОМБИ (с проверкой блока) ====================
+    // ==================== СПАВН ЗОМБИ (исправлен) ====================
     private static void spawnZombie() {
         if (fakeCount >= TOTAL_FAKES) {
             mc.player.sendMessage(Text.literal("§eВсе 20 зомби пройдены. Нажми X для сохранения."), true);
@@ -167,8 +166,8 @@ public class KillAura implements ModInitializer {
             BlockPos pos = new BlockPos((int)Math.floor(x), (int)Math.floor(y), (int)Math.floor(z));
             BlockPos below = pos.down();
             if (world.getBlockState(below).isSolid() && world.isAir(pos) && world.isAir(pos.up())) {
-                // Создаём зомби через EntityType
-                ZombieEntity zombie = EntityType.ZOMBIE.create(world);
+                // === ИСПРАВЛЕННЫЙ СПАВН ЗОМБИ ===
+                ZombieEntity zombie = new ZombieEntity(EntityType.ZOMBIE, world);
                 if (zombie == null) {
                     mc.player.sendMessage(Text.literal("§cНе удалось создать зомби."), true);
                     return;
@@ -176,7 +175,6 @@ public class KillAura implements ModInitializer {
                 zombie.setPosition(x, y, z);
                 zombie.setCustomName(Text.literal("§cЗомби #" + (fakeCount + 1)));
                 zombie.setCustomNameVisible(true);
-                // Отключаем ИИ, чтобы стоял на месте
                 zombie.setAiDisabled(true);
                 world.spawnEntity(zombie);
                 currentFake = zombie;
