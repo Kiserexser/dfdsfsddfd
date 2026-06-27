@@ -55,13 +55,15 @@ public class ArrowMod implements ModInitializer {
         @Override
         public void init() {
             super.init();
-            mc.getWindow().setCursorVisible(false);
+            // Скрываем курсор (Mojang маппинги)
+            mc.getWindow().setCursorState(false);
         }
 
         @Override
-        public void removed() {
-            super.removed();
-            mc.getWindow().setCursorVisible(true);
+        public void close() {
+            // Показываем курсор при закрытии
+            mc.getWindow().setCursorState(true);
+            super.close();
         }
 
         @Override
