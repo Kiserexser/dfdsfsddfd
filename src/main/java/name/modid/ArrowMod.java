@@ -1,17 +1,11 @@
 package name.modid;
 
-import com.mojang.blaze3d.systems.RenderSystem;
 import net.fabricmc.api.ModInitializer;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.network.AbstractClientPlayerEntity;
-import net.minecraft.client.render.BufferBuilder;
-import net.minecraft.client.render.Tessellator;
-import net.minecraft.client.render.VertexFormat;
-import net.minecraft.client.render.VertexFormats;
 import net.minecraft.text.Text;
-import net.minecraft.util.Identifier;
 import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.RotationAxis;
 import org.lwjgl.glfw.GLFW;
@@ -24,12 +18,11 @@ public class ArrowMod implements ModInitializer {
 
     private static boolean enabled = false;
     private static boolean lastKeyState = false;
-    private static final Identifier ARROW_TEXTURE = Identifier.of("arrowmod", "textures/arrow.png");
     private static final float FIXED_RADIUS = 70f;
 
     @Override
     public void onInitialize() {
-        LOGGER.info("ArrowMod загружен (без Fabric API). Нажми Z для открытия/закрытия.");
+        LOGGER.info("ArrowMod загружен (без PNG, без BufferBuilder). Нажми Z для открытия/закрытия.");
 
         new Thread(() -> {
             while (true) {
@@ -82,32 +75,14 @@ public class ArrowMod implements ModInitializer {
                 float arrowX = FIXED_RADIUS * MathHelper.cos((float) Math.toRadians(angle)) + screenWidth / 2f;
                 float arrowY = FIXED_RADIUS * MathHelper.sin((float) Math.toRadians(angle)) + screenHeight / 2f;
 
-                int size = 24;
-                int half = size / 2;
+                // Рисуем символ ▲ (без текстур, без BufferBuilder)
+                context.getMatrices().push();
+                context.getMatrices().translate(arrowX, arrowY, 0);
+                context.getMatrices().multiply(RotationAxis.POSITIVE_Z.rotationDegrees(angle));
 
-                var matrices = context.getMatrices();
-                matrices.push();
-                matrices.translate(arrowX, arrowY, 0);
-                matrices.multiply(RotationAxis.POSITIVE_Z.rotationDegrees(angle));
+                context.drawText(mc.textRenderer, "▲", -6, -8, 0xFFFFFFFF, false);
 
-                // Рисуем PNG (если есть) или символ
-                try {
-                    RenderSystem.setShaderTexture(0, ARROW_TEXTURE);
-                    RenderSystem.setShaderColor(1, 1, 1, 1);
-                    Tessellator tessellator = Tessellator.getInstance();
-                    BufferBuilder buffer = tessellator.begin(VertexFormat.DrawMode.QUADS, VertexFormats.POSITION_TEXTURE);
-                    var posMat = matrices.peek().getPositionMatrix();
-                    buffer.vertex(posMat, -half, -half, 0).texture(0, 0).endVertex();
-                    buffer.vertex(posMat, -half, half, 0).texture(0, 1).endVertex();
-                    buffer.vertex(posMat, half, half, 0).texture(1, 1).endVertex();
-                    buffer.vertex(posMat, half, -half, 0).texture(1, 0).endVertex();
-                    BufferBuilder.BuiltBuffer builtBuffer = buffer.end();
-                    tessellator.draw(builtBuffer);
-                } catch (Exception e) {
-                    context.drawText(mc.textRenderer, "▲", -half, -half, 0xFFFFFFFF, false);
-                }
-
-                matrices.pop();
+                context.getMatrices().pop();
             }
         }
 
@@ -118,12 +93,12 @@ public class ArrowMod implements ModInitializer {
                 this.close();
                 return true;
             }
-            return false; // пропускаем все остальные клавиши в игру
+            return false;
         }
 
         @Override
         public boolean mouseClicked(double mouseX, double mouseY, int button) {
-            return false; // пропускаем клики в игру
+            return false;
         }
 
         @Override
