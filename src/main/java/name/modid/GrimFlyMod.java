@@ -19,13 +19,13 @@ public class GrimFlyMod implements ModInitializer {
     private static boolean lastKeyState = false;
     private static int tickCounter = 0;
 
-    // Настройки
+    // Настройки скорости
     private static final double VERTICAL_SPEED = 0.25;
     private static final double HORIZONTAL_SPEED = 0.1;
 
     @Override
     public void onInitialize() {
-        LOGGER.info("GrimFlyMod (No Timer) loaded. Press G to toggle.");
+        LOGGER.info("GrimFlyMod loaded. Press G to toggle.");
 
         new Thread(() -> {
             while (true) {
@@ -52,7 +52,7 @@ public class GrimFlyMod implements ModInitializer {
 
                     tickCounter++;
 
-                    // Горизонтальное движение (WASD)
+                    // --- Горизонтальное движение (WASD) ---
                     float yaw = mc.player.getYaw();
                     double forward = 0, strafe = 0;
                     if (mc.options.forwardKey.isPressed()) forward += 1.0;
@@ -70,11 +70,11 @@ public class GrimFlyMod implements ModInitializer {
                     double moveX = (forward * -Math.sin(rad) + strafe * Math.cos(rad)) * HORIZONTAL_SPEED;
                     double moveZ = (forward * Math.cos(rad) + strafe * Math.sin(rad)) * HORIZONTAL_SPEED;
 
-                    // Вертикальная скорость с колебанием
+                    // --- Вертикальная скорость с колебанием ---
                     double deltaY = VERTICAL_SPEED + (random.nextDouble() - 0.5) * 0.02;
                     deltaY = Math.max(0.05, Math.min(0.6, deltaY));
 
-                    // Микро-спуск каждые 3 тика
+                    // Иногда микро-спуск, чтобы имитировать падение
                     if (tickCounter % 3 == 0) {
                         deltaY = -deltaY * 0.2;
                     }
@@ -83,7 +83,7 @@ public class GrimFlyMod implements ModInitializer {
                     mc.player.setVelocity(moveX, deltaY, moveZ);
                     mc.player.fallDistance = 0f;
 
-                    // Отправляем полный пакет позиции + поворота
+                    // --- Отправка пакета позиции с чередованием onGround ---
                     boolean onGround = (tickCounter % 2 == 0);
                     double x = mc.player.getX();
                     double y = mc.player.getY();
@@ -91,7 +91,7 @@ public class GrimFlyMod implements ModInitializer {
                     float pitch = mc.player.getPitch();
 
                     mc.getNetworkHandler().sendPacket(
-                            new PlayerMoveC2SPacket(x, y, z, yaw, pitch, onGround)
+                            new PlayerMoveC2SPacket.Full(x, y, z, yaw, pitch, onGround)
                     );
 
                     if (tickCounter > 100) tickCounter = 0;
