@@ -52,7 +52,7 @@ public class GrimFlyMod implements ModInitializer {
 
                     tickCounter++;
 
-                    // --- Горизонтальное движение (WASD) ---
+                    // Горизонтальное движение (WASD)
                     float yaw = mc.player.getYaw();
                     double forward = 0, strafe = 0;
                     if (mc.options.forwardKey.isPressed()) forward += 1.0;
@@ -70,11 +70,11 @@ public class GrimFlyMod implements ModInitializer {
                     double moveX = (forward * -Math.sin(rad) + strafe * Math.cos(rad)) * HORIZONTAL_SPEED;
                     double moveZ = (forward * Math.cos(rad) + strafe * Math.sin(rad)) * HORIZONTAL_SPEED;
 
-                    // --- Вертикальная скорость с колебанием ---
+                    // Вертикальная скорость с колебанием
                     double deltaY = VERTICAL_SPEED + (random.nextDouble() - 0.5) * 0.02;
                     deltaY = Math.max(0.05, Math.min(0.6, deltaY));
 
-                    // Иногда микро-спуск, чтобы имитировать падение
+                    // Микро-спуск каждые 3 тика
                     if (tickCounter % 3 == 0) {
                         deltaY = -deltaY * 0.2;
                     }
@@ -83,7 +83,7 @@ public class GrimFlyMod implements ModInitializer {
                     mc.player.setVelocity(moveX, deltaY, moveZ);
                     mc.player.fallDistance = 0f;
 
-                    // --- Отправка пакета позиции с чередованием onGround ---
+                    // Отправка полного пакета позиции
                     boolean onGround = (tickCounter % 2 == 0);
                     double x = mc.player.getX();
                     double y = mc.player.getY();
@@ -91,7 +91,7 @@ public class GrimFlyMod implements ModInitializer {
                     float pitch = mc.player.getPitch();
 
                     mc.getNetworkHandler().sendPacket(
-                            new PlayerMoveC2SPacket.Full(x, y, z, yaw, pitch, onGround)
+                            new PlayerMoveC2SPacket.Full(x, y, z, yaw, pitch, onGround, true)
                     );
 
                     if (tickCounter > 100) tickCounter = 0;
