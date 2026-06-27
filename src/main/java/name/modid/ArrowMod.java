@@ -52,23 +52,10 @@ public class ArrowMod implements ModInitializer {
             super(Text.literal(""));
         }
 
-        @Override
-        public void init() {
-            super.init();
-            // Скрываем курсор (Mojang маппинги)
-            mc.getWindow().setCursorState(false);
-        }
-
-        @Override
-        public void close() {
-            // Показываем курсор при закрытии
-            mc.getWindow().setCursorState(true);
-            super.close();
-        }
-
+        // Пустой фон – не затеняем игру
         @Override
         public void renderBackground(DrawContext context, int mouseX, int mouseY, float delta) {
-            // Прозрачный фон – не затеняем игру
+            // Ничего не рисуем
         }
 
         @Override
@@ -102,7 +89,7 @@ public class ArrowMod implements ModInitializer {
                 matrices.translate(arrowX, arrowY, 0);
                 matrices.multiply(RotationAxis.POSITIVE_Z.rotationDegrees(angle));
 
-                // Символ ▲ – остриё указывает вверх (теперь повернётся правильно)
+                // Символ ▲ – остриё вверх
                 context.drawText(mc.textRenderer, "▲", -5, -10, 0xFFFFFFFF, false);
 
                 matrices.pop();
@@ -117,6 +104,7 @@ public class ArrowMod implements ModInitializer {
             }
         }
 
+        // Все клавиши, кроме Z и ESC, пропускаем в игру
         @Override
         public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
             if (keyCode == GLFW.GLFW_KEY_Z || keyCode == GLFW.GLFW_KEY_ESCAPE) {
@@ -124,12 +112,13 @@ public class ArrowMod implements ModInitializer {
                 this.close();
                 return true;
             }
-            return false; // все остальные клавиши идут в игру
+            return false; // пропускаем в игру
         }
 
+        // Все клики мыши пропускаем в игру
         @Override
         public boolean mouseClicked(double mouseX, double mouseY, int button) {
-            return false; // клики идут в игру
+            return false;
         }
 
         @Override
