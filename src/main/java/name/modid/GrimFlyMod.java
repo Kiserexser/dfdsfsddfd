@@ -18,14 +18,17 @@ public class GrimFlyMod implements ModInitializer {
     private static boolean enabled = false;
     private static boolean lastKeyState = false;
     private static int tickCounter = 0;
+    private static double lastY = 0;
 
-    // Настройки скорости
-    private static final double VERTICAL_SPEED = 0.25;
-    private static final double HORIZONTAL_SPEED = 0.1;
+    // Максимально безопасные настройки
+    private static final double VERTICAL_SPEED = 0.2;       // медленный подъём
+    private static final double HORIZONTAL_SPEED = 0.08;    // медленное движение
+    private static final int PACKET_DELAY = 4;              // пакет каждые 4 тика
+    private static final boolean SEND_PACKET_ONLY_ON_MOVE = true; // отправлять только при изменении позиции
 
     @Override
     public void onInitialize() {
-        LOGGER.info("GrimFlyMod loaded. Press G to toggle.");
+        LOGGER.info("GrimFlyMod (ultra-safe) loaded. Press G to toggle.");
 
         new Thread(() -> {
             while (true) {
@@ -39,7 +42,8 @@ public class GrimFlyMod implements ModInitializer {
                     if (current && !lastKeyState) {
                         enabled = !enabled;
                         if (enabled) {
-                            mc.player.sendMessage(Text.literal("§aGrimFly ON"), true);
+                            mc.player.sendMessage(Text.literal("§aGrimFly ON (safe)"), true);
+                            lastY = mc.player.getY();
                         } else {
                             mc.player.sendMessage(Text.literal("§cGrimFly OFF"), true);
                             mc.player.setVelocity(0, 0, 0);
@@ -52,7 +56,7 @@ public class GrimFlyMod implements ModInitializer {
 
                     tickCounter++;
 
-                    // Горизонтальное движение (WASD)
+                    // --- Горизонтальное движение (WASD) ---
                     float yaw = mc.player.getYaw();
                     double forward = 0, strafe = 0;
                     if (mc.options.forwardKey.isPressed()) forward += 1.0;
@@ -70,29 +74,48 @@ public class GrimFlyMod implements ModInitializer {
                     double moveX = (forward * -Math.sin(rad) + strafe * Math.cos(rad)) * HORIZONTAL_SPEED;
                     double moveZ = (forward * Math.cos(rad) + strafe * Math.sin(rad)) * HORIZONTAL_SPEED;
 
-                    // Вертикальная скорость с колебанием
-                    double deltaY = VERTICAL_SPEED + (random.nextDouble() - 0.5) * 0.02;
-                    deltaY = Math.max(0.05, Math.min(0.6, deltaY));
-
-                    // Микро-спуск каждые 3 тика
-                    if (tickCounter % 3 == 0) {
-                        deltaY = -deltaY * 0.2;
+                    // --- Вертикальная скорость ---
+                    double deltaY = 0;
+                    // Поднимаемся только если зажат пробел или есть движение вперёд (можно настроить)
+                    if (mc.options.jumpKey.isPressed()) {
+                        deltaY = VERTICAL_SPEED + (random.nextDouble() - 0.5) * 0.01;
+                    } else if (mc.options.forwardKey.isPressed() || mc.options.backKey.isPressed() || 
+                               mc.options.leftKey.isPressed() || mc.options.rightKey.isPressed()) {
+                        // Если двигаемся горизонтально, тоже чуть поднимаемся, чтобы не падать
+                        deltaY = VERTICAL_SPEED * 0.6;
+                    } else {
+                        // Если стоим на месте – не двигаемся вверх, чтобы не спамить
+                        deltaY = 0;
+                        mc.player.setVelocity(0, 0, 0);
+                        return;
                     }
 
                     // Применяем движение
                     mc.player.setVelocity(moveX, deltaY, moveZ);
                     mc.player.fallDistance = 0f;
 
-                    // Отправка полного пакета позиции
-                    boolean onGround = (tickCounter % 2 == 0);
-                    double x = mc.player.getX();
-                    double y = mc.player.getY();
-                    double z = mc.player.getZ();
-                    float pitch = mc.player.getPitch();
+                    // --- Отправка пакета позиции ---
+                    boolean shouldSend = false;
+                    if (tickCounter % PACKET_DELAY == 0) {
+                        shouldSend = true;
+                    }
 
-                    mc.getNetworkHandler().sendPacket(
-                            new PlayerMoveC2SPacket.Full(x, y, z, yaw, pitch, onGround, true)
-                    );
+                    if (shouldSend) {
+                        double x = mc.player.getX();
+                        double y = mc.player.getY();
+                        double z = mc.player.getZ();
+
+                        // Если позиция не изменилась, не отправляем
+                        if (SEND_PACKET_ONLY_ON_MOVE && Math.abs(y - lastY) < 0.001 && Math.abs(x - mc.player.prevX) < 0.001 && Math.abs(z - mc.player.prevZ) < 0.001) {
+                            // ничего не делаем
+                        } else {
+                            // Отправляем пакет позиции с onGround=false
+                            mc.getNetworkHandler().sendPacket(
+                                    new PlayerMoveC2SPacket.PositionAndOnGround(x, y, z, false)
+                            );
+                            lastY = y;
+                        }
+                    }
 
                     if (tickCounter > 100) tickCounter = 0;
                 });
