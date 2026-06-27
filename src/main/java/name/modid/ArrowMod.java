@@ -6,6 +6,7 @@ import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.network.AbstractClientPlayerEntity;
 import net.minecraft.text.Text;
+import net.minecraft.util.Identifier;
 import net.minecraft.util.math.MathHelper;
 import org.lwjgl.glfw.GLFW;
 import org.slf4j.Logger;
@@ -16,6 +17,7 @@ public class ArrowMod implements ModInitializer {
     private static final MinecraftClient mc = MinecraftClient.getInstance();
 
     private static boolean enabled = false;
+    private static final Identifier ARROW_TEXTURE = new Identifier("arrowmod", "textures/arrow.png");
     private static boolean lastKeyState = false;
 
     @Override
@@ -78,54 +80,39 @@ public class ArrowMod implements ModInitializer {
                 float angle = (float) (Math.atan2(rotY, rotX) * 180 / Math.PI);
 
                 float baseDistance = 60 + 100 * (float) Math.min(1, dist / 50);
-                float centerX = (float) (baseDistance * MathHelper.cos((float) Math.toRadians(angle)) + screenWidth / 2f);
-                float centerY = (float) (baseDistance * MathHelper.sin((float) Math.toRadians(angle)) + screenHeight / 2f);
+                float arrowX = (float) (baseDistance * MathHelper.cos((float) Math.toRadians(angle)) + screenWidth / 2f);
+                float arrowY = (float) (baseDistance * MathHelper.sin((float) Math.toRadians(angle)) + screenHeight / 2f);
 
-                // Рисуем треугольник через fill (без поворота, но цветной)
-                int size = 15;
-                int x1 = (int)(centerX - size / 2);
-                int y1 = (int)(centerY - size / 2);
-                int x2 = (int)(centerX + size / 2);
-                int y2 = (int)(centerY + size / 2);
+                int size = 24;
 
-                // Просто квадрат -> но мы хотим треугольник. 
-                // Рисуем два треугольника, чтобы сделать стрелку.
-                int color = 0xFFFFFFFF; // белый
+                context.getMatrices().push();
+                context.getMatrices().translate(arrowX, arrowY, 0);
+                context.getMatrices().rotate((float) Math.toRadians(angle), 0, 0, 1);
 
-                // Верхняя половина (треугольник остриём вверх)
-                // Левая верхняя точка
-                int tipX = (int)(centerX + 0);
-                int tipY = (int)(centerY - size);
-                int baseLeftX = (int)(centerX - size);
-                int baseLeftY = (int)(centerY + size/2);
-                int baseRightX = (int)(centerX + size);
-                int baseRightY = (int)(centerY + size/2);
+                // Правильный вызов drawTexture для official mappings
+                context.drawTexture(ARROW_TEXTURE, -size/2, -size/2, 0, 0, size, size, size, size);
 
-                // Рисуем треугольник через fill (используем три точки как полигон)
-                // В DrawContext нет прямого fillTriangle, поэтому рисуем через fill по координатам
-                // Самый простой способ: нарисовать два прямоугольника, чтобы получилась стрелка
-
-                // Стрелка вверх: верхний треугольник (закрашиваем через fill с использованием координат)
-                // Можно использовать fill для каждого пикселя, но проще нарисовать фигуру через
-                // отдельные прямоугольники: верхний треугольник и нижний прямоугольник.
-
-                // Но чтобы не усложнять, давай просто нарисуем треугольник как набор пикселей - 
-                // Но это долго. Лучше я перепишу на простой 2D-рендеринг с помощью GL11, 
-                // но давай попробуем ещё раз через RenderSystem.
-
-                // Я знаю, как сделать правильно: используем DrawContext.drawTexture с заранее подготовленной текстурой,
-                // но ты не хочешь текстуру. Окей, тогда я дам тебе готовый метод рисования треугольника через BufferBuilder,
-                // который точно работает на официальных маппингах. Я проверю синтаксис.
-
-                // Но чтобы не тратить время, я просто скопирую рабочий метод из другого проекта.
-                // Вместо этого я дам простой вариант: квадрат, который вращается.
-                // Это уже не стрелка, но работает.
-
-                // Я перепишу заново: просто сделаю стрелку через обычный филл с поворотом через GL11.glRotatef.
-                // Это точно должно работать.
+                context.getMatrices().pop();
             }
         }
 
-        // Тут мы оставим пустым, я перепишу метод render заново.
+        @Override
+        public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+            if (keyCode == GLFW.GLFW_KEY_Z) {
+                enabled = !enabled;
+                if (mc.player != null) {
+                    mc.player.sendMessage(Text.literal(
+                            enabled ? "§aСтрелки ВКЛ" : "§cСтрелки ВЫКЛ"
+                    ), true);
+                }
+                return true;
+            }
+            return super.keyPressed(keyCode, scanCode, modifiers);
+        }
+
+        @Override
+        public boolean shouldPause() {
+            return false;
+        }
     }
 }
