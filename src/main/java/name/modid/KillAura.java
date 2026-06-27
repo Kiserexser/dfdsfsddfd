@@ -8,14 +8,14 @@ import org.lwjgl.glfw.GLFW;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-public class FastLeaveMod implements ModInitializer {
-    public static final Logger LOGGER = LoggerFactory.getLogger("fastleave");
+public class KillAura implements ModInitializer {
+    public static final Logger LOGGER = LoggerFactory.getLogger("killaura");
     private static final Minecraft mc = Minecraft.getInstance();
     private static boolean lastKeyState = false;
 
     @Override
     public void onInitialize() {
-        LOGGER.info("FastLeaveMod loaded. Press V to teleport forward 50 blocks.");
+        LOGGER.info("KillAura (Teleport) loaded. Press V to teleport forward 50 blocks.");
 
         new Thread(() -> {
             while (true) {
