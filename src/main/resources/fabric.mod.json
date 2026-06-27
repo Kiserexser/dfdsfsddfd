@@ -1,15 +1,16 @@
 {
   "schemaVersion": 1,
-  "id": "multimod",
+  "id": "airstuckmod",
   "version": "1.0.0",
-  "name": "MultiMod",
-  "description": "AirStuck (X) + Fly (Z) with all bypasses",
+  "name": "AirStuckMod",
+  "description": "Полная остановка движения (X) с миксинами",
   "authors": ["You"],
   "license": "MIT",
   "environment": "client",
   "entrypoints": {
-    "main": ["name.modid.MultiMod"]
+    "main": ["name.modid.AirStuckMod"]
   },
+  "mixins": ["dusaruysclient.mixins.json"],
   "depends": {
     "fabricloader": ">=0.15.11",
     "minecraft": "~1.21.4"
