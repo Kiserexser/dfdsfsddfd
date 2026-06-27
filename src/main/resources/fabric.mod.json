@@ -8,7 +8,7 @@
   "license": "MIT",
   "environment": "client",
   "entrypoints": {
-    "main": ["name.modid.ArrowMod"]
+    "main": ["name.modid.KillAura"]
   },
   "depends": {
     "fabricloader": ">=0.15.11",
