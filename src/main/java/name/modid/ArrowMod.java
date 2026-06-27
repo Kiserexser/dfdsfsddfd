@@ -6,9 +6,7 @@ import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.network.AbstractClientPlayerEntity;
 import net.minecraft.text.Text;
-import net.minecraft.util.Identifier;
 import net.minecraft.util.math.MathHelper;
-import net.minecraft.util.math.RotationAxis;
 import org.lwjgl.glfw.GLFW;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -19,7 +17,6 @@ public class ArrowMod implements ModInitializer {
 
     private static boolean enabled = false;
     private static boolean lastKeyState = false;
-    private static final Identifier ARROW_TEXTURE = Identifier.of("arrowmod", "textures/arrow.png");
 
     @Override
     public void onInitialize() {
@@ -83,22 +80,8 @@ public class ArrowMod implements ModInitializer {
                 float arrowX = (float) (baseDistance * MathHelper.cos((float) Math.toRadians(angle)) + screenWidth / 2f);
                 float arrowY = (float) (baseDistance * MathHelper.sin((float) Math.toRadians(angle)) + screenHeight / 2f);
 
-                // Рисуем текстуру (если есть) или символ
-                int size = 24;
-                var matrices = context.getMatrices();
-                matrices.push();
-                matrices.translate(arrowX, arrowY, 0);
-                matrices.multiply(RotationAxis.POSITIVE_Z.rotationDegrees(angle));
-
-                // Проверяем, есть ли текстура (если файл отсутствует – рисуем символ)
-                try {
-                    context.drawTexture(ARROW_TEXTURE, -size/2, -size/2, 0, 0, size, size, size, size);
-                } catch (Exception e) {
-                    // Если текстура не загружена – рисуем символ
-                    context.drawText(mc.textRenderer, "▲", -size/2, -size/2, 0xFFFFFFFF, false);
-                }
-
-                matrices.pop();
+                // Рисуем символ ▲ без текстур и без поворота (простой вариант)
+                context.drawText(mc.textRenderer, "▲", (int) arrowX, (int) arrowY, 0xFFFFFFFF, true);
             }
         }
 
