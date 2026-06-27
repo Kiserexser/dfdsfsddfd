@@ -1,14 +1,14 @@
 {
   "schemaVersion": 1,
-  "id": "grimflymod",
+  "id": "multimod",
   "version": "1.0.0",
-  "name": "GrimFlyMod",
-  "description": "GrimAC flight bypass (optimized, no spam)",
+  "name": "MultiMod",
+  "description": "AirStuck (X) + Fly (Z) with all bypasses",
   "authors": ["You"],
   "license": "MIT",
   "environment": "client",
   "entrypoints": {
-    "main": ["name.modid.GrimFlyMod"]
+    "main": ["name.modid.MultiMod"]
   },
   "depends": {
     "fabricloader": ">=0.15.11",
