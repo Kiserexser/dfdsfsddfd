@@ -22,7 +22,7 @@ public class ArrowMod implements ModInitializer {
 
     @Override
     public void onInitialize() {
-        LOGGER.info("ArrowMod загружен (без GL11). Нажми Z для открытия/закрытия.");
+        LOGGER.info("ArrowMod загружен. Нажми Z для включения/выключения.");
 
         new Thread(() -> {
             while (true) {
@@ -52,10 +52,10 @@ public class ArrowMod implements ModInitializer {
             super(Text.literal(""));
         }
 
-        // Пустой фон – прозрачный экран
+        // Пустой фон – не затеняем игру
         @Override
         public void renderBackground(DrawContext context, int mouseX, int mouseY, float delta) {
-            // Не рисуем фон
+            // Ничего не рисуем
         }
 
         @Override
@@ -87,19 +87,23 @@ public class ArrowMod implements ModInitializer {
                 matrices.translate(arrowX, arrowY, 0);
                 matrices.multiply(RotationAxis.POSITIVE_Z.rotationDegrees(angle));
 
-                // Рисуем символ ▲ с поворотом
-                context.drawText(mc.textRenderer, "▲", -6, -9, 0xFFFFFFFF, false);
+                // Рисуем символ ▲ с центром в (0,0) – остриё вверх
+                // Смещение подобрано так, чтобы центр символа был в (0,0)
+                context.drawText(mc.textRenderer, "▲", -5, -10, 0xFFFFFFFF, false);
 
                 matrices.pop();
 
-                // Показываем дистанцию
+                // Показываем дистанцию под стрелкой
                 if (dist > 0) {
                     String distText = String.format("%.1f", dist);
-                    context.drawText(mc.textRenderer, distText, (int) arrowX - mc.textRenderer.getWidth(distText) / 2, (int) (arrowY + 18), 0xCCFFFFFF, false);
+                    float textX = arrowX - mc.textRenderer.getWidth(distText) / 2f;
+                    float textY = arrowY + 12f;
+                    context.drawText(mc.textRenderer, distText, (int) textX, (int) textY, 0xCCFFFFFF, false);
                 }
             }
         }
 
+        // Пропускаем все клавиши в игру (кроме Z и ESC – для закрытия)
         @Override
         public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
             if (keyCode == GLFW.GLFW_KEY_Z || keyCode == GLFW.GLFW_KEY_ESCAPE) {
@@ -107,12 +111,13 @@ public class ArrowMod implements ModInitializer {
                 this.close();
                 return true;
             }
-            return false; // пропускаем все остальные клавиши в игру
+            return false; // все остальные клавиши уходят в игру
         }
 
+        // Пропускаем клики мыши в игру
         @Override
         public boolean mouseClicked(double mouseX, double mouseY, int button) {
-            return false; // пропускаем клики в игру
+            return false;
         }
 
         @Override
