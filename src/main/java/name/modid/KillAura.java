@@ -3,14 +3,17 @@ package name.modid;
 import net.fabricmc.api.ModInitializer;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.entity.Entity;
-import net.minecraft.entity.decoration.ArmorStandEntity;
+import net.minecraft.entity.LivingEntity;
+import net.minecraft.entity.mob.ZombieEntity;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.text.Text;
 import net.minecraft.util.hit.EntityHitResult;
 import net.minecraft.util.hit.HitResult;
+import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Box;
 import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.Vec3d;
+import net.minecraft.world.World;
 import org.lwjgl.glfw.GLFW;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -49,7 +52,7 @@ public class KillAura implements ModInitializer {
     private static final String FILE_PREFIX = "neuro_style_";
     private static final String FILE_EXT = ".txt";
 
-    private static ArmorStandEntity currentFake = null;
+    private static ZombieEntity currentFake = null; // теперь зомби
     private static long fakeSpawnTime = 0;
     private static boolean isRecording = false;
     private static int fakeCount = 0;
@@ -58,7 +61,7 @@ public class KillAura implements ModInitializer {
     private static List<float[]> neuralData = new ArrayList<>();
     private static int playIndex = 0;
     private static float lastYaw = 0, lastPitch = 0;
-    private static PlayerEntity lockedTarget = null;
+    private static LivingEntity lockedTarget = null; // теперь живая сущность
     private static long lastPlayAttackTime = 0;
 
     private static final int KEY_LEARN = GLFW.GLFW_KEY_X;
@@ -68,7 +71,7 @@ public class KillAura implements ModInitializer {
 
     @Override
     public void onInitialize() {
-        LOGGER.info("Neuro KillAura: X - обучение, Z - спавн фейка, R - бой");
+        LOGGER.info("Neuro KillAura (Zombies). X - обучение, Z - спавн зомби, R - бой");
         loadLatestStyle();
 
         new Thread(() -> {
@@ -84,7 +87,7 @@ public class KillAura implements ModInitializer {
                         boolean zPressed = GLFW.glfwGetKey(window, KEY_SPAWN) == GLFW.GLFW_PRESS;
                         boolean rPressed = GLFW.glfwGetKey(window, KEY_PLAY) == GLFW.GLFW_PRESS;
 
-                        // === X – переключение обучения ===
+                        // === X – обучение ===
                         if (xPressed && !lastLearn) {
                             if (mode == Mode.LEARN) {
                                 finishLearning();
@@ -93,15 +96,15 @@ public class KillAura implements ModInitializer {
                                 fakeCount = 0;
                                 recordedSamples.clear();
                                 sampleCount = 0;
-                                mc.player.sendMessage(Text.literal("§aОбучение начато. Жми Z для спавна фейков."), true);
+                                mc.player.sendMessage(Text.literal("§aОбучение начато. Жми Z для спавна зомби."), true);
                             }
                         }
                         lastLearn = xPressed;
 
-                        // === Z – спавн фейка (только в режиме обучения) ===
+                        // === Z – спавн зомби ===
                         if (zPressed && !lastSpawn) {
                             if (mode == Mode.LEARN) {
-                                spawnFake();
+                                spawnZombie();
                             } else {
                                 mc.player.sendMessage(Text.literal("§cСначала включи обучение (X)"), true);
                             }
@@ -141,37 +144,51 @@ public class KillAura implements ModInitializer {
         }).start();
     }
 
-    // ==================== ОБУЧЕНИЕ ====================
-    private static void spawnFake() {
+    // ==================== СПАВН ЗОМБИ (с проверкой блока) ====================
+    private static void spawnZombie() {
         if (fakeCount >= TOTAL_FAKES) {
-            mc.player.sendMessage(Text.literal("§eВсе 20 фейков пройдены. Нажми X для сохранения."), true);
+            mc.player.sendMessage(Text.literal("§eВсе 20 зомби пройдены. Нажми X для сохранения."), true);
             return;
         }
         if (currentFake != null && !currentFake.isRemoved()) {
-            mc.player.sendMessage(Text.literal("§cУже есть фейк. Наведись на него."), true);
+            mc.player.sendMessage(Text.literal("§cУже есть зомби. Наведись на него."), true);
             return;
         }
 
+        // Поиск валидной позиции
+        World world = mc.world;
         double angle = random.nextDouble() * 2 * Math.PI;
         double radius = 1.5 + random.nextDouble() * 0.5;
-        double x = mc.player.getX() + radius * MathHelper.cos((float) angle);
-        double z = mc.player.getZ() + radius * MathHelper.sin((float) angle);
-        double y = mc.player.getY() + 0.2;
+        for (int attempt = 0; attempt < 20; attempt++) {
+            double x = mc.player.getX() + radius * MathHelper.cos((float) angle);
+            double z = mc.player.getZ() + radius * MathHelper.sin((float) angle);
+            double y = mc.player.getY();
 
-        currentFake = new ArmorStandEntity(mc.world, x, y, z);
-        currentFake.setInvisible(true);
-        currentFake.setCustomName(Text.literal("§cFake #" + (fakeCount + 1)));
-        currentFake.setCustomNameVisible(true);
-        mc.world.addEntity(currentFake);
-
-        fakeSpawnTime = System.currentTimeMillis();
-        isRecording = false;
-        mc.player.sendMessage(Text.literal("§aФейк #" + (fakeCount + 1) + " появился. Наведись на него."), true);
+            BlockPos pos = new BlockPos((int)Math.floor(x), (int)Math.floor(y), (int)Math.floor(z));
+            // Проверяем, что под ногами твёрдый блок и место свободно
+            BlockPos below = pos.down();
+            if (world.getBlockState(below).isSolid() && world.isAir(pos) && world.isAir(pos.up())) {
+                // Спавним зомби
+                currentFake = new ZombieEntity(world, x, y, z);
+                currentFake.setCustomName(Text.literal("§cЗомби #" + (fakeCount + 1)));
+                currentFake.setCustomNameVisible(true);
+                currentFake.setAiDisabled(false); // можно без ИИ, чтобы стоял
+                world.spawnEntity(currentFake);
+                fakeSpawnTime = System.currentTimeMillis();
+                isRecording = false;
+                mc.player.sendMessage(Text.literal("§aЗомби #" + (fakeCount + 1) + " появился. Наведись на него."), true);
+                return;
+            }
+            // Меняем угол для следующей попытки
+            angle += 0.3;
+        }
+        mc.player.sendMessage(Text.literal("§cНе удалось найти место для спавна зомби."), true);
     }
 
+    // ==================== ОБУЧЕНИЕ ====================
     private static void updateLearning() {
         if (currentFake == null || currentFake.isRemoved()) {
-            if (fakeCount < TOTAL_FAKES) spawnFake();
+            if (fakeCount < TOTAL_FAKES) spawnZombie();
             return;
         }
 
@@ -193,15 +210,15 @@ public class KillAura implements ModInitializer {
             }
             long elapsed = System.currentTimeMillis() - recordStartTime;
             if (elapsed >= LEARN_DURATION_SEC * 1000) {
-                mc.player.sendMessage(Text.literal("§aЗапись для фейка #" + (fakeCount + 1) + " завершена."), true);
+                mc.player.sendMessage(Text.literal("§aЗапись для зомби #" + (fakeCount + 1) + " завершена."), true);
                 currentFake.remove(Entity.RemovalReason.DISCARDED);
                 currentFake = null;
                 fakeCount++;
                 isRecording = false;
                 if (fakeCount >= TOTAL_FAKES) {
-                    mc.player.sendMessage(Text.literal("§eВсе фейки пройдены! Нажми X для сохранения."), true);
+                    mc.player.sendMessage(Text.literal("§eВсе зомби пройдены! Нажми X для сохранения."), true);
                 } else {
-                    spawnFake();
+                    spawnZombie();
                 }
             }
         } else {
@@ -212,9 +229,9 @@ public class KillAura implements ModInitializer {
         }
     }
 
-    private static float[] captureSample(Entity target) {
+    private static float[] captureSample(LivingEntity target) {
         Vec3d eye = mc.player.getEyePos();
-        Vec3d targetPos = target.getPos().add(0, 0.5, 0);
+        Vec3d targetPos = target.getPos().add(0, target.getHeight() * 0.5, 0);
         double dx = targetPos.x - eye.x;
         double dy = targetPos.y - eye.y;
         double dz = targetPos.z - eye.z;
@@ -294,12 +311,12 @@ public class KillAura implements ModInitializer {
         } catch (IOException e) { LOGGER.error("Load error", e); }
     }
 
-    // ==================== БОЕВОЙ РЕЖИМ ====================
+    // ==================== БОЕВОЙ РЕЖИМ (все живые сущности) ====================
     private static void updatePlay() {
         if (neuralData.isEmpty()) { mode = Mode.OFF; return; }
-        PlayerEntity target = lockedTarget;
+        LivingEntity target = lockedTarget;
         if (target == null || target.isDead() || !target.isAlive() || mc.player.distanceTo(target) > 5.0) {
-            target = getTargetPlayer();
+            target = getTargetLiving();
             if (target != null) lockedTarget = target;
             else { lockedTarget = null; return; }
         }
@@ -310,17 +327,17 @@ public class KillAura implements ModInitializer {
         applyLearnedStyle(target);
     }
 
-    private static PlayerEntity getTargetPlayer() {
+    private static LivingEntity getTargetLiving() {
         if (mc.player == null || mc.world == null) return null;
         Box box = mc.player.getBoundingBox().expand(5.0);
-        List<PlayerEntity> players = mc.world.getEntitiesByClass(PlayerEntity.class, box,
+        List<LivingEntity> entities = mc.world.getEntitiesByClass(LivingEntity.class, box,
                 e -> e != mc.player && e.isAlive() && !e.isDead());
-        players.removeIf(e -> mc.player.distanceTo(e) > 5.0);
-        players.sort(Comparator.comparingDouble(e -> mc.player.distanceTo(e)));
-        return players.isEmpty() ? null : players.get(0);
+        entities.removeIf(e -> mc.player.distanceTo(e) > 5.0);
+        entities.sort(Comparator.comparingDouble(e -> mc.player.distanceTo(e)));
+        return entities.isEmpty() ? null : entities.get(0);
     }
 
-    private static void applyLearnedStyle(PlayerEntity target) {
+    private static void applyLearnedStyle(LivingEntity target) {
         if (playIndex >= neuralData.size()) playIndex = 0;
         float[] s = neuralData.get(playIndex);
         if (s == null) return;
