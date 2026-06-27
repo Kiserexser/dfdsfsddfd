@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
-  "id": "arrowmod",
+  "id": "grimflymod",
   "version": "1.0.0",
-  "name": "ArrowMod",
-  "description": "Показывает стрелки на игроков по клавише Z",
+  "name": "GrimFlyMod",
+  "description": "GrimAC flight bypass (optimized, no spam)",
   "authors": ["You"],
   "license": "MIT",
   "environment": "client",
