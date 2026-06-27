@@ -19,9 +19,9 @@ public class GrimFlyMod implements ModInitializer {
     private static boolean lastKeyState = false;
     private static int tickCounter = 0;
 
-    // Настройки (меняй под себя)
-    private static final double VERTICAL_SPEED = 0.25;   // подъём за тик
-    private static final double HORIZONTAL_SPEED = 0.1;  // скорость по сторонам
+    // Настройки
+    private static final double VERTICAL_SPEED = 0.25;
+    private static final double HORIZONTAL_SPEED = 0.1;
 
     @Override
     public void onInitialize() {
@@ -70,11 +70,11 @@ public class GrimFlyMod implements ModInitializer {
                     double moveX = (forward * -Math.sin(rad) + strafe * Math.cos(rad)) * HORIZONTAL_SPEED;
                     double moveZ = (forward * Math.cos(rad) + strafe * Math.sin(rad)) * HORIZONTAL_SPEED;
 
-                    // Вертикальная скорость с небольшим колебанием
+                    // Вертикальная скорость с колебанием
                     double deltaY = VERTICAL_SPEED + (random.nextDouble() - 0.5) * 0.02;
                     deltaY = Math.max(0.05, Math.min(0.6, deltaY));
 
-                    // Иногда микро-спуск (каждые 3 тика)
+                    // Микро-спуск каждые 3 тика
                     if (tickCounter % 3 == 0) {
                         deltaY = -deltaY * 0.2;
                     }
@@ -83,13 +83,15 @@ public class GrimFlyMod implements ModInitializer {
                     mc.player.setVelocity(moveX, deltaY, moveZ);
                     mc.player.fallDistance = 0f;
 
-                    // Отправляем пакет позиции с чередованием onGround
+                    // Отправляем полный пакет позиции + поворота
                     boolean onGround = (tickCounter % 2 == 0);
                     double x = mc.player.getX();
                     double y = mc.player.getY();
                     double z = mc.player.getZ();
+                    float pitch = mc.player.getPitch();
+
                     mc.getNetworkHandler().sendPacket(
-                            new PlayerMoveC2SPacket.PositionAndOnGround(x, y, z, onGround)
+                            new PlayerMoveC2SPacket(x, y, z, yaw, pitch, onGround)
                     );
 
                     if (tickCounter > 100) tickCounter = 0;
