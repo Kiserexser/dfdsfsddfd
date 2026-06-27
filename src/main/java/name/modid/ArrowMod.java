@@ -7,8 +7,8 @@ import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.network.AbstractClientPlayerEntity;
 import net.minecraft.text.Text;
 import net.minecraft.util.math.MathHelper;
-import net.minecraft.util.math.RotationAxis;
 import org.lwjgl.glfw.GLFW;
+import org.lwjgl.opengl.GL11;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -22,7 +22,7 @@ public class ArrowMod implements ModInitializer {
 
     @Override
     public void onInitialize() {
-        LOGGER.info("ArrowMod загружен (без PNG, без BufferBuilder). Нажми Z для открытия/закрытия.");
+        LOGGER.info("ArrowMod загружен (без Fabric API). Нажми Z для открытия/закрытия.");
 
         new Thread(() -> {
             while (true) {
@@ -60,6 +60,7 @@ public class ArrowMod implements ModInitializer {
 
             for (AbstractClientPlayerEntity player : mc.world.getPlayers()) {
                 if (player == mc.player || player.isDead() || !player.isAlive()) continue;
+
                 double dx = player.getX() - mc.player.getX();
                 double dz = player.getZ() - mc.player.getZ();
                 double dist = Math.sqrt(dx * dx + dz * dz);
@@ -75,14 +76,34 @@ public class ArrowMod implements ModInitializer {
                 float arrowX = FIXED_RADIUS * MathHelper.cos((float) Math.toRadians(angle)) + screenWidth / 2f;
                 float arrowY = FIXED_RADIUS * MathHelper.sin((float) Math.toRadians(angle)) + screenHeight / 2f;
 
-                // Рисуем символ ▲ (без текстур, без BufferBuilder)
-                context.getMatrices().push();
-                context.getMatrices().translate(arrowX, arrowY, 0);
-                context.getMatrices().multiply(RotationAxis.POSITIVE_Z.rotationDegrees(angle));
+                // Рисуем треугольник через GL11
+                GL11.glPushMatrix();
+                GL11.glTranslatef(arrowX, arrowY, 0);
+                GL11.glRotatef(angle, 0, 0, 1);
 
-                context.drawText(mc.textRenderer, "▲", -6, -8, 0xFFFFFFFF, false);
+                // Цвет белый (можно поменять)
+                GL11.glColor4f(1, 1, 1, 1);
 
-                context.getMatrices().pop();
+                // Размеры: ширина 12, длина 18 (в 1.5 раза больше)
+                float halfWidth = 6f;
+                float length = 18f;
+
+                GL11.glBegin(GL11.GL_TRIANGLES);
+                // Остриё (впереди, по оси Y вверх)
+                GL11.glVertex2f(0, length / 2);
+                // Левая нижняя точка
+                GL11.glVertex2f(-halfWidth, -length / 2);
+                // Правая нижняя точка
+                GL11.glVertex2f(halfWidth, -length / 2);
+                GL11.glEnd();
+
+                GL11.glPopMatrix();
+
+                // Отображение дистанции (опционально)
+                if (dist > 0) {
+                    String distText = String.format("%.1f", dist);
+                    context.drawText(mc.textRenderer, distText, (int) arrowX - mc.textRenderer.getWidth(distText) / 2, (int) (arrowY + length / 2 + 6), 0xCCFFFFFF, false);
+                }
             }
         }
 
