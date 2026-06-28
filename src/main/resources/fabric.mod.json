@@ -1,16 +1,14 @@
 {
   "schemaVersion": 1,
-  "id": "airstuckmod",
+  "id": "simplemod",
   "version": "1.0.0",
-  "name": "AirStuckMod",
-  "description": "Полная остановка движения (X) с миксинами",
+  "name": "SimpleMod",
+  "description": "Минимальный мод",
   "authors": ["You"],
-  "license": "MIT",
   "environment": "client",
   "entrypoints": {
-    "main": ["name.modid.AirStuckMod"]
+    "main": ["name.modid.SimpleMod"]
   },
-  "mixins": ["dusaruysclient.mixins.json"],
   "depends": {
     "fabricloader": ">=0.15.11",
     "minecraft": "~1.21.4"
