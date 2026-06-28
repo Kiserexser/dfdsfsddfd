@@ -1,54 +1,81 @@
-package name.modid;
+package name.modid.gui;
 
-import net.fabricmc.api.ModInitializer;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.Font;
+import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.gui.screens.TitleScreen;
+import net.minecraft.client.gui.screens.multiplayer.JoinMultiplayerScreen;
+import net.minecraft.client.gui.screens.options.OptionsScreen;
+import net.minecraft.client.gui.screens.worldselection.WorldSelectionScreen;
 import net.minecraft.network.chat.Component;
-import org.lwjgl.glfw.GLFW;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
-public class AirStuckMod implements ModInitializer {
-    public static final Logger LOGGER = LoggerFactory.getLogger("airstuck");
-    public static final Minecraft mc = Minecraft.getInstance();
-    private static boolean enabled = false;
-    private static boolean lastKeyState = false;
+public class SimpleMenuScreen extends Screen {
 
-    public static boolean isEnabled() {
-        return enabled;
+    public SimpleMenuScreen() {
+        super(Component.literal("Simple Menu"));
     }
 
     @Override
-    public void onInitialize() {
-        LOGGER.info("AirStuckMod (with mixins) loaded. Press X to toggle.");
+    protected void init() {
+        super.init();
 
-        new Thread(() -> {
-            while (true) {
-                try { Thread.sleep(10); } catch (InterruptedException ignored) {}
+        int centerX = this.width / 2;
+        int centerY = this.height / 2;
 
-                mc.execute(() -> {
-                    if (mc.getWindow() == null || mc.player == null) return;
-                    long window = mc.getWindow().getWindow();
+        // Кнопка "Singleplayer"
+        this.addRenderableWidget(Button.builder(Component.literal("Singleplayer"), button ->
+                        Minecraft.getInstance().setScreen(new WorldSelectionScreen(this)))
+                .pos(centerX - 75, centerY - 50)
+                .size(150, 25)
+                .build());
 
-                    boolean current = GLFW.glfwGetKey(window, GLFW.GLFW_KEY_X) == GLFW.GLFW_PRESS;
-                    if (current && !lastKeyState) {
-                        enabled = !enabled;
-                        if (enabled) {
-                            mc.player.sendSystemMessage(Component.literal("§aAirStuck ON (mixins)"));
-                            mc.player.setDeltaMovement(0, 0, 0);
-                            mc.player.fallDistance = 0;
-                        } else {
-                            mc.player.sendSystemMessage(Component.literal("§cAirStuck OFF"));
-                        }
-                        LOGGER.info("AirStuck: " + (enabled ? "ON" : "OFF"));
-                    }
-                    lastKeyState = current;
+        // Кнопка "Multiplayer"
+        this.addRenderableWidget(Button.builder(Component.literal("Multiplayer"), button ->
+                        Minecraft.getInstance().setScreen(new JoinMultiplayerScreen(this)))
+                .pos(centerX - 75, centerY)
+                .size(150, 25)
+                .build());
 
-                    if (enabled && mc.player != null) {
-                        mc.player.setDeltaMovement(0, 0, 0);
-                        mc.player.fallDistance = 0;
-                    }
-                });
-            }
-        }).start();
+        // Кнопка "Options"
+        this.addRenderableWidget(Button.builder(Component.literal("Options"), button ->
+                        Minecraft.getInstance().setScreen(new OptionsScreen(this, Minecraft.getInstance().options)))
+                .pos(centerX - 75, centerY + 50)
+                .size(150, 25)
+                .build());
+
+        // Кнопка "Exit"
+        this.addRenderableWidget(Button.builder(Component.literal("Exit"), button ->
+                        Minecraft.getInstance().stop())
+                .pos(centerX - 75, centerY + 100)
+                .size(150, 25)
+                .build());
+    }
+
+    @Override
+    public void render(GuiGraphics context, int mouseX, int mouseY, float delta) {
+        // Простая заливка фона (тёмно-зелёный, можно изменить цвет)
+        context.fill(0, 0, this.width, this.height, 0xFF1A2A1A);
+
+        // Заголовок
+        Font font = Minecraft.getInstance().font;
+        String title = "Simple Menu";
+        int titleWidth = font.width(title);
+        context.drawString(font, title, (this.width - titleWidth) / 2, 30, 0xFFFFFFFF, false);
+
+        // Рисуем кнопки (добавлены через addRenderableWidget)
+        super.render(context, mouseX, mouseY, delta);
+    }
+
+    @Override
+    public void onClose() {
+        // Возврат на стандартный титульный экран при закрытии (ESC)
+        Minecraft.getInstance().setScreen(new TitleScreen());
+    }
+
+    @Override
+    public boolean shouldCloseOnEsc() {
+        return true;
     }
 }
